@@ -753,3 +753,16 @@ button,input,select{font:inherit;color:inherit}
 .studio-panel button:disabled{opacity:.6;cursor:wait}
 .studio-panel :focus-visible{outline:2px solid var(--brand);outline-offset:3px}
 @media(max-width:600px){.studio-panel{padding:16px}.studio-connect>*{width:100%}}
+/* Keep the production form aligned with the workbench content edge. */
+body:has(#view-studio.is-active) #views{max-width:none;margin:0}
+.studio-panel{max-width:1240px}
+.studio-connect[hidden]{display:none}
+.studio-panel form>.btn{align-self:flex-start;min-width:180px}
+#studioDevice{color:var(--brand-ink);font-weight:600}
+@media(max-width:600px){
+  .side-foot{gap:8px;align-items:center;flex-wrap:wrap}
+  .side-foot .ops-field{gap:4px;flex-direction:row;align-items:center;white-space:nowrap}
+  .side-foot .ops-field span{font-size:11px}
+  .side-foot .ops-field input{max-width:100px}
+  .side-foot .sync{white-space:nowrap;flex-shrink:0}
+}

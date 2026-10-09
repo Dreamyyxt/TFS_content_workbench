@@ -6,7 +6,7 @@ const crypto = require('node:crypto');
 const { pipeline } = require('node:stream/promises');
 const { Transform } = require('node:stream');
 function createVideoAPI({ dir, userToken, agentToken, leaseMs = 120000 }) {
-  if (path.resolve(dir).startsWith(path.resolve(__dirname) + path.sep)) throw Error('VIDEO_DATA_DIR must be outside static root');
+  if (path.resolve(dir) === path.resolve(__dirname) || path.resolve(dir).startsWith(path.resolve(__dirname) + path.sep)) throw Error('VIDEO_DATA_DIR must be outside static root');
   const file = path.join(dir, 'state.json');
   let state;
   const save = () => { fs.writeFileSync(file + '.tmp', JSON.stringify(state)); fs.renameSync(file + '.tmp', file); };
@@ -22,6 +22,7 @@ function createVideoAPI({ dir, userToken, agentToken, leaseMs = 120000 }) {
     try {
       const p=url.pathname.slice('/api/video/'.length), agent=p.startsWith('agent/');
       auth(req, agent ? agentToken : userToken); init(); expire();
+      if(p === 'status' && req.method === 'GET') return json(res,200,{devices:state.devices.map(d=>({...d,online:Date.now()-d.last_seen<30000})),queued:state.jobs.filter(j=>j.status==='queued').length}),true;
       if(p === 'assets' && req.method === 'POST') {
         const ext=path.extname(url.searchParams.get('name') || '').toLowerCase();
         if(!['.jpg','.jpeg','.png','.webp','.mp4','.mov','.m4v'].includes(ext)) fail(400,'只支持照片和视频');
@@ -57,6 +58,7 @@ function createVideoAPI({ dir, userToken, agentToken, leaseMs = 120000 }) {
       if(action && req.method==='POST') {
         const j=state.jobs.find(j=>j.id===action[1]); if(!j) fail(404,'任务不存在');
         if(j.status!=='rendering' || req.headers['x-job-claim']!==j.claim) fail(409,'任务租约已失效');
+        const device=state.devices.find(d=>d.id===j.device_id); if(device) device.last_seen=Date.now();
         if(action[2]==='complete') { const dest=path.join(dir,j.id+'.'+j.claim+'.upload'); await upload(req,dest,200*1024*1024); if(j.status!=='rendering' || req.headers['x-job-claim']!==j.claim || j.lease_until<Date.now()) { fs.rmSync(dest,{force:true}); fail(409,'任务租约已失效'); } fs.renameSync(dest,path.join(dir,j.id+'.mp4')); j.status='review'; }
         else if(action[2]==='fail') { const b=await body(req); j.status='failed'; j.error=String(b.error || '渲染失败').slice(0,1000); }
         else { const b=await body(req); if(b.timeline && b.timeline.version===1 && Array.isArray(b.timeline.clips)) j.timeline=b.timeline; j.lease_until=Date.now()+leaseMs; }

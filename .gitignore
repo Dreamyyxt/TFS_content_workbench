@@ -2,3 +2,4 @@
 .video-data/
 __pycache__/
 *.pyc
+outputs/video-p0-acceptance/

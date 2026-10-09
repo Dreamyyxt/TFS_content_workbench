@@ -412,7 +412,7 @@ function initCloud(){
     throw new Error('云 SDK 未加载完成，请刷新页面重试');
   }
   cloud = window.WorkBuddyCloud.createWorkBuddyCloud({
-    endpoint: PUBLIC_CONFIG.endpoint,
+    endpoint: ['localhost','127.0.0.1'].includes(location.hostname) ? location.origin : PUBLIC_CONFIG.endpoint,
     oauthRelayBaseUrl: PUBLIC_CONFIG.oauthRelayBaseUrl,
     publishableKey: PUBLIC_CONFIG.publishableKey
   });
@@ -2723,7 +2723,7 @@ function renderAll(){
 }
 
 async function boot(){
-  try{ bind(); }
+  try{ bind(); if(location.hash === '#studio') switchView('studio'); }
   catch(err){ console.error('[工作台] 事件绑定失败', err); }
   try{
     setSync('连接中', 'is-busy');

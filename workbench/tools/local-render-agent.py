@@ -70,7 +70,15 @@ def main():
 
     request('agent/register', {'device_id': args.device_id, 'ffmpeg': True})
     while True:
-        job = request('agent/claim', {'device_id': args.device_id})
+        try:
+            request('agent/register', {'device_id': args.device_id, 'ffmpeg': True})
+            job = request('agent/claim', {'device_id': args.device_id})
+        except Exception as exc:
+            print('连接暂时失败，5 秒后重试:', exc, flush=True)
+            if args.once:
+                raise
+            time.sleep(5)
+            continue
         if job:
             route = 'agent/jobs/' + job['id'] + '/'
             stop = threading.Event()
