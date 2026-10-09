@@ -33,7 +33,10 @@
           <span class="nav-txt">拍摄辅助</span>
           <em id="badgeScripts">0</em>
         </button>
-        <button class="tab" data-view="video"><span class="nav-txt">视频制作</span></button>
+        <button class="tab" data-view="video">
+          <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4m-10-5 4 2-4 2v-4Z"/></svg></span>
+          <span class="nav-txt">视频制作</span><em id="badgeVideo" data-zero="1">0</em>
+        </button>
         <button class="tab" data-view="schedule">
           <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></span>
           <span class="nav-txt">自动排期</span>
@@ -176,29 +179,57 @@
 
   <!-- ============ ③ 自动排期 ============ -->
   <section class="view" id="view-video">
-    <div class="panel jy-studio">
-      <p class="hint">内容生产 / 03</p><h2>视频制作中心</h2>
-      <p>带入拍摄脚本，上传真实素材，生成可继续编辑的剪映工程。</p>
-      <p id="jyStatus" role="status">请启动 Mac 剪映连接器，再连接。</p>
-      <button class="btn btn-ghost" id="jyConnect">连接 Mac 剪映</button>
-      <form id="jyForm">
-        <label>视频标题<input id="jyTitle" required maxlength="150" value="美甲作品"></label>
-        <p id="jySource" class="hint">独立制作 · 也可从拍摄辅助的脚本进入</p>
-        <label>导入脚本（TXT / Markdown）<input id="jyImport" type="file" accept=".txt,.md"></label>
-        <label>拍摄脚本<textarea id="jyScript" rows="7" maxlength="30000" placeholder="粘贴已确认的脚本；原文会随工程保存，供剪映中继续制作"></textarea></label>
-        <label>画面字幕（可选，每行一句，按时长平均分配）<textarea id="jyCaptions" rows="3" maxlength="2000"></textarea></label>
-        <label>制作备注<textarea id="jyNotes" rows="2" maxlength="4000" placeholder="备注会保存在工程内，供人工调整；当前不会自动理解任意剪辑指令"></textarea></label>
-        <label>目标时长<select id="jyDuration"><option value="12">12 秒</option><option value="20" selected>20 秒</option><option value="30">30 秒</option></select></label>
-        <p class="hint">9:16 · 1080P · 30FPS。按素材顺序剪辑，视频从开头截取；短视频不足时由照片补足，没有照片则提示补充素材。音乐在剪映中添加。</p>
-        <label>上传照片和视频（单个 ≤100MB，最多30个）<input id="jyFiles" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.m4v"></label>
-        <ol id="jyAssets"></ol>
-        <button class="btn btn-primary" id="jySubmit" type="submit">生成剪映工程</button>
-        <p id="jyMessage" role="status"></p>
-      </form>
-      <h3>制作任务</h3><button class="btn btn-ghost" id="jyRefresh">刷新进度</button>
-      <div id="jyJobs"><p class="hint">连接后显示本机保存的任务。</p></div>
+    <div class="panel video-heading">
+      <div class="panel-head">
+        <div><h2>视频制作 <span class="h2-sub">· 从脚本到视频</span></h2><p class="hint">上传实拍素材剪辑，或让 AI 根据拍摄脚本生成视频。</p></div>
+        <button class="btn btn-ghost btn-sm" id="jyConnect">连接制作服务</button>
+      </div>
+      <div class="video-modebar">
+        <div class="chips" role="group" aria-label="制作方式">
+          <button class="chip is-active" type="button" id="jyModeEdit" aria-pressed="true">剪辑</button>
+          <button class="chip" type="button" id="jyModeGenerate" aria-pressed="false">生成</button>
+        </div>
+        <p id="jyModeHint">剪映 Skill · 必须上传照片或视频 · 输出可编辑工程</p>
+      </div>
+      <p id="jyStatus" class="video-connection" role="status">正在连接本机制作服务…</p>
+    </div>
+    <form id="jyForm">
+      <div class="video-layout">
+        <div class="panel video-script-panel">
+          <div class="panel-head"><h3>制作内容</h3><label class="btn btn-ghost btn-sm video-import" for="jyImport">导入脚本<input id="jyImport" type="file" accept=".txt,.md" class="visually-hidden"></label></div>
+          <p id="jySource" class="hint">可从拍摄辅助中选择脚本，也可直接粘贴或导入。</p>
+          <label class="fld"><span>视频标题</span><input id="jyTitle" required maxlength="150" value="美甲作品"></label>
+          <label class="fld"><span>拍摄脚本 <span id="jyScriptRequired">（可选）</span></span><textarea id="jyScript" rows="10" maxlength="30000" placeholder="粘贴已确认的分镜、画面描述和文案…"></textarea></label>
+          <label class="fld"><span id="jyNotesLabel">剪辑备注（随工程保存）</span><textarea id="jyNotes" rows="2" maxlength="4000" placeholder="补充镜头、节奏或风格要求"></textarea></label>
+          <details class="video-advanced"><summary>字幕与更多设置</summary>
+            <label class="fld"><span id="jyCaptionsLabel">画面字幕（每行一句，按时长平均分配）</span><textarea id="jyCaptions" rows="3" maxlength="2000"></textarea></label>
+            <div id="jyGenAdvanced" hidden>
+              <label class="fld"><span>火山视频模型</span><select id="jyModel"><option value="doubao-seedance-2-0-fast-260128">Seedance 2.0 Fast</option><option value="doubao-seedance-2-0-260128">Seedance 2.0</option><option value="doubao-seedance-2-0-mini-260615">Seedance 2.0 Mini</option><option value="doubao-seedance-2-5-260628">Seedance 2.5</option></select></label>
+              <label class="fld"><span>参考视频链接（可选，每行一个，最多3段）</span><textarea id="jyReferenceVideos" rows="2" placeholder="https://…"></textarea></label>
+              <p class="hint">视频参考需为火山可访问的 HTTPS 链接；Seedance 2.0 参考视频总时长不超过15秒。</p>
+            </div>
+          </details>
+        </div>
+        <aside class="panel video-assets-panel">
+          <div class="panel-head"><h3 id="jyAssetsHeading">实拍素材 <span class="h2-sub">· 必填</span></h3><span class="hint" id="jyAssetCount">0 个</span></div>
+          <label class="video-upload" for="jyFiles" tabindex="0" id="jyDropzone">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M12 16V3m-5 5 5-5 5 5M4 14v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/></svg>
+            <strong id="jyUploadTitle">选择照片或视频</strong><span id="jyUploadHint">也可拖入素材 · 单个 ≤100MB</span>
+            <input id="jyFiles" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.m4v" class="visually-hidden">
+          </label>
+          <ol id="jyAssets" class="video-assets"></ol>
+          <div class="video-settings"><label class="fld"><span>目标时长</span><select id="jyDuration"><option value="12">12 秒</option><option value="20" selected>20 秒</option><option value="30">30 秒</option></select></label><span id="jyFormat" class="hint">9:16 · 1080P · 30FPS</span></div>
+          <p class="hint" id="jyRules">按素材顺序剪辑，保留真实画面。短视频不足时由照片补足；脚本与备注随工程保存，供剪映内调整。</p>
+        </aside>
+      </div>
+      <div class="video-submitbar"><p id="jyMessage" role="status">选择素材后即可开始剪辑。</p><button class="btn btn-primary" id="jySubmit" type="submit">开始剪辑</button></div>
+    </form>
+    <div class="panel video-tasks">
+      <div class="panel-head"><div><h3>制作任务</h3><p class="hint">查看制作进度、剪映工程与生成的视频。</p></div><button class="btn btn-ghost btn-sm" id="jyRefresh">刷新进度</button></div>
+      <div id="jyJobs"><div class="empty">还没有制作任务。提交后会在这里显示进度和结果。</div></div>
     </div>
   </section>
+  <!-- ============ 自动排期 ============ -->
   <section class="view" id="view-schedule">
     <div class="panel">
       <div class="panel-head">

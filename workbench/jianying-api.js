@@ -6,15 +6,48 @@ const {pipeline} = require('node:stream/promises');
 const {Transform} = require('node:stream');
 const WEB_ORIGIN = 'https://nail-content-workbench.app.workbuddy.host';
 
-function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs = 120000}) {
+function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs = 120000, volc = null, generationInterval = 5000}) {
   dir = path.resolve(dir);
   if (dir === __dirname || dir.startsWith(__dirname + path.sep)) throw Error('草稿数据不能位于静态目录内');
-  let state;
+  let state, pumping=false;
+  async function pump() {
+    if (!volc || pumping) return;
+    init();
+    const job=state.jobs.find(j=>j.mode==='generate' && ['queued','generating','downloading'].includes(j.status));
+    if(!job)return;
+    pumping=true;
+    try{
+      if(!job.remote_id){
+        // Persist before POST: after a restart an uncertain submission must never auto-submit twice.
+        job.status='submitting';job.attempts++;save();
+        job.remote_id=await volc.submit(job,dir);job.status='generating';save();
+      }
+      const result=await volc.get(job.remote_id);
+      job.remote_status=result.status;job.error='';save();
+      if(result.status==='succeeded'){
+        job.status='downloading';job.output_url=result.content?.video_url;save();
+        await volc.download(job.output_url,path.join(dir,job.id+'.mp4'));
+        job.status='finished';job.finished_at=new Date().toISOString();delete job.output_url;save();
+      }else if(['failed','expired','cancelled'].includes(result.status)){
+        job.status='failed';job.error=String(result.error?.message || '火山任务未成功：'+result.status).slice(0,500);job.remote_failed=true;save();
+      }
+    }catch(e){
+      if(e.uncertain){job.status='submission_unknown';job.error=e.message;}
+      else if(e.transient && job.remote_id){job.error=e.message;}
+      else{job.status='failed';job.error=e.message;}
+      save();
+    }finally{pumping=false;}
+  }
+  const timer=volc ? setInterval(()=>pump().catch(()=>{}),generationInterval) : null;
+  timer?.unref();
   const stateFile = path.join(dir, 'state.json');
   const init = () => {
     if (state) return;
     fs.mkdirSync(dir, {recursive:true, mode:0o700});
     state = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile)) : {assets:[], jobs:[], device:null};
+    for(const job of state.jobs)if(job.mode==='generate' && job.status==='submitting'){
+      job.status='submission_unknown';job.error='提交时连接器被关闭，请到方舟控制台核对后填写任务 ID。';save();
+    }
   };
   const save = () => {
     fs.writeFileSync(stateFile + '.tmp', JSON.stringify(state), {mode:0o600});
@@ -25,7 +58,7 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
     res.writeHead(status, {'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store'});
     res.end(JSON.stringify(data));
   };
-  const safeJob = ({claim, ...job}) => job;
+  const safeJob = ({claim, output_url, ...job}) => job;
   const authorize = (req, token) => {
     if (!token) fail(503, '请先启动 Mac 剪映连接器');
     const a = Buffer.from(req.headers.authorization || '');
@@ -53,7 +86,7 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
     } catch (error) {fs.rmSync(destination, {force:true}); throw error;}
     return size;
   }
-  return async (req,res,url) => {
+  const handler = async (req,res,url) => {
     if (!url.pathname.startsWith('/api/jianying/')) return false;
     try {
       const route = url.pathname.slice('/api/jianying/'.length);
@@ -82,6 +115,7 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
           job.status='failed';job.error='Mac 连接中断，请重试';delete job.claim;save();
         }
       }
+      if (route==='generation/status' && req.method==='GET') {send(res,200,volc?await volc.capabilities():{ready:false,error:'请启动本机制作服务'});return true;}
       if (route === 'status' && req.method === 'GET') {
         send(res,200,{device:state.device, online:!!state.device && Date.now()-state.device.last_seen < 30000});return true;
       }
@@ -96,11 +130,21 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
       if (route === 'jobs' && req.method === 'GET') {send(res,200,state.jobs.map(safeJob));return true;}
       if (route === 'jobs' && req.method === 'POST') {
         const b=await json(req);
-        if (!Array.isArray(b.asset_ids) || !b.asset_ids.length || b.asset_ids.length>30 || new Set(b.asset_ids).size!==b.asset_ids.length || b.asset_ids.some(id=>!state.assets.some(a=>a.id===id))) fail(400,'请选择 1–30 个不同的素材');
-        if (![12,20,30].includes(b.duration) || typeof b.request_id!=='string' || !b.request_id || b.request_id.length>100) fail(400,'时长或提交标识无效');
+        const mode=b.mode || 'edit';
+        if(!['edit','generate'].includes(mode))fail(400,'请选择剪辑或生成');
+        if (!Array.isArray(b.asset_ids) || (mode==='edit' && !b.asset_ids.length) || b.asset_ids.length>30 || new Set(b.asset_ids).size!==b.asset_ids.length || b.asset_ids.some(id=>!state.assets.some(a=>a.id===id))) fail(400,'请选择 1–30 个不同的素材');
+        if (!(mode==='edit'?[12,20,30]:[5,10,15]).includes(b.duration) || typeof b.request_id!=='string' || !b.request_id || b.request_id.length>100) fail(400,'时长或提交标识无效');
         const old=state.jobs.find(j=>j.request_id===b.request_id);
         if (old) {send(res,200,safeJob(old));return true;}
-        const job={id:crypto.randomUUID(), request_id:b.request_id, title:String(b.title || '第五季作品').slice(0,150),
+        if(mode==='generate'){
+          if(!volc)fail(503,'本机生成服务未启动');
+          if(!String(b.script || '').trim())fail(400,'AI 生成需要拍摄脚本');
+          const refs=b.asset_ids.map(id=>state.assets.find(a=>a.id===id));
+          if(refs.some(a=>a.type!=='image') || refs.length>9 || refs.some(a=>a.size>=30*1024*1024) || refs.reduce((n,a)=>n+a.size,0)>40*1024*1024)fail(400,'AI 参考照片最多9张，单张小于30MB，合计不超过40MB；视频请填写参考链接');
+          if(!Array.isArray(b.reference_videos || []) || (b.reference_videos || []).length>3 || (b.reference_videos || []).some(u=>{try{return new URL(u).protocol!=='https:';}catch{return true;}}))fail(400,'参考视频需为 HTTPS 公网链接，最多3段');
+          if(!/^(doubao-seedance-2-[\w-]+|ep-[\w-]+)$/.test(String(b.model || '')))fail(400,'请选择可用的火山视频模型');
+        }
+        const job={mode,model:mode==='generate'?b.model:undefined,reference_videos:mode==='generate'?(b.reference_videos || []):[],id:crypto.randomUUID(), request_id:b.request_id, title:String(b.title || '第五季作品').slice(0,150),
           content_id:String(b.content_id || crypto.randomUUID()).slice(0,100),script_id:b.script_id || null,
           account:String(b.account || '').slice(0,100),script:String(b.script || '').slice(0,30000),
           instructions:String(b.instructions || '').slice(0,4000),captions:String(b.captions || '').slice(0,2000),
@@ -113,7 +157,15 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
         const job=state.jobs.find(j=>j.id===retry[1]);
         if (!job) fail(404,'任务不存在');
         if (job.status!=='failed') fail(409,'只有失败任务可以重试');
-        job.status='queued';job.error='';save();send(res,200,{ok:true});return true;
+        if(job.remote_failed){delete job.remote_id;delete job.remote_status;delete job.remote_failed;}
+        job.status=job.mode==='generate' && job.remote_id?'generating':'queued';job.error='';save();send(res,200,{ok:true});return true;
+      }
+      const reconcile=route.match(/^jobs\/([\w-]+)\/reconcile$/);
+      if(reconcile && req.method==='POST'){
+        const job=state.jobs.find(j=>j.id===reconcile[1]);const b=await json(req);
+        if(!job || job.status!=='submission_unknown')fail(409,'任务当前不需要核对');
+        if(!/^cgt-[\w-]+$/.test(String(b.remote_id || '')))fail(400,'请输入方舟控制台中的 cgt- 任务 ID');
+        job.remote_id=b.remote_id;job.status='generating';job.error='';save();send(res,200,{ok:true});return true;
       }
       const final=route.match(/^jobs\/([\w-]+)\/final$/);
       if (final) {
@@ -130,7 +182,16 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
           job.status='finished';save();send(res,200,{ok:true});return true;
         }
         if (req.method==='GET' && job.status==='finished') {
-          const f=path.join(dir,job.id+'.mp4');res.writeHead(200,{'Content-Type':'video/mp4','Content-Length':fs.statSync(f).size});fs.createReadStream(f).pipe(res);return true;
+          const f=path.join(dir,job.id+'.mp4'),size=fs.statSync(f).size;
+          const range=req.headers.range;const match=range && range.match(/^bytes=(\d*)-(\d*)$/);
+          let start=0,end=size-1;
+          if(range){
+            if(!match || (!match[1] && !match[2])){res.writeHead(416,{'Content-Range':'bytes */'+size});res.end();return true;}
+            if(!match[1])start=Math.max(0,size-Number(match[2]));else start=Number(match[1]);
+            if(match[1] && match[2])end=Math.min(end,Number(match[2]));
+            if(start>=size || start>end){res.writeHead(416,{'Content-Range':'bytes */'+size});res.end();return true;}
+          }
+          res.writeHead(range?206:200,{'Content-Type':'video/mp4','Content-Length':end-start+1,'Accept-Ranges':'bytes',...(range?{'Content-Range':`bytes ${start}-${end}/${size}`}:{})});fs.createReadStream(f,{start,end}).pipe(res);return true;
         }
         fail(404,'尚未上传成片');
       }
@@ -138,7 +199,7 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
         const b=await json(req);
         state.device={skill_version:String(b.skill_version || ''),ready:!!b.ready,last_seen:Date.now(),error:String(b.error || '').slice(0,500)};
         const active=state.jobs.some(j=>j.status==='building');
-        const job=state.device.ready && !active ? state.jobs.find(j=>j.status==='queued') : null;
+        const job=state.device.ready && !active ? state.jobs.find(j=>j.status==='queued' && j.mode!=='generate') : null;
         if (job) Object.assign(job,{status:'building',claim:crypto.randomUUID(),lease_until:Date.now()+leaseMs,attempts:job.attempts+1});
         save();send(res,200,job ? {...job,assets:job.assets.map(a=>({...a,path:path.join(dir,a.id+a.ext)}))} : null);return true;
       }
@@ -164,6 +225,8 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
     }
     return true;
   };
+  handler.close=()=>{if(timer)clearInterval(timer);};
+  return handler;
 }
 function urlHost(req) {return String(req.headers.host || '').split(':')[0];}
 module.exports={createJianyingAPI};

@@ -42,7 +42,7 @@ const ROOT = __dirname;
 const JY_LOCAL = process.env.JY_LOCAL === '1';
 const jianyingAPI = JY_LOCAL ? require('./jianying-api').createJianyingAPI({
   dir: process.env.JY_DATA_DIR || path.join(ROOT, '../.jianying-data'),
-  userToken: process.env.JY_USER_TOKEN, workerToken: process.env.JY_WORKER_TOKEN, local:true
+  userToken: process.env.JY_USER_TOKEN, workerToken: process.env.JY_WORKER_TOKEN, local:true, volc: require('./volc-video').createVolcClient()
 }) : null;
 const PORT = Number(process.env.PORT || 3000);
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +

@@ -739,4 +739,40 @@ button,input,select{font:inherit;color:inherit}
   border-radius:6px;padding:6px 10px;margin:8px 0 0;line-height:1.7}
 .fix-note.is-partial{color:var(--warn);background:var(--warn-soft)}
 
-.jy-studio{max-width:1000px;padding:28px}.jy-studio form{max-width:720px;margin:24px 0}.jy-studio label{display:block;margin:18px 0;color:var(--text,#333)}.jy-studio input:not([type=file]),.jy-studio textarea,.jy-studio select{display:block;width:100%;margin-top:8px;padding:12px;border:1px solid #e7dbd4;border-radius:10px;background:white;font:inherit;box-sizing:border-box}.jy-studio textarea{resize:vertical}.jy-studio li{margin:10px 0;overflow-wrap:anywhere}.jy-studio li button{margin-left:8px}.jy-job{border-top:1px solid #e7dbd4;padding:20px 0}.jy-job code{display:block;overflow-wrap:anywhere;margin:12px 0}.jy-job video{display:block;width:100%;max-width:320px;max-height:500px}.jy-job input{display:block;margin:12px 0}
+/* 视频制作沿用现有 panel / fld / chip / btn 组件。 */
+.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+.video-heading .hint{margin-top:4px}.video-modebar{display:flex;align-items:center;gap:14px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line-2)}
+.video-modebar p{font-size:13px;color:var(--ink-2)}.video-connection{font-size:12.5px;color:var(--ink-2);margin-top:12px}.video-connection.is-error{color:var(--danger)}
+.video-layout{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr);gap:16px;margin-top:16px;align-items:start}
+.video-layout .panel + .panel{margin-top:0}.video-layout h3,.video-tasks h3{font-size:16px}.video-script-panel>.fld{margin-top:16px}
+#view-video .fld>span{font-size:13px;color:var(--ink-2)}
+#view-video textarea{padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-2);font:inherit;font-size:14px;line-height:1.7;resize:vertical;width:100%;color:var(--ink)}
+#view-video input::placeholder,#view-video textarea::placeholder{color:#756a62}
+#view-video textarea:focus{outline:2px solid var(--brand-soft);border-color:var(--brand);background:var(--surface)}
+.video-import{cursor:pointer}.video-import:focus-within{outline:2px solid var(--brand);outline-offset:3px}
+.video-advanced{margin-top:16px;font-size:13px;color:var(--ink-2)}.video-advanced summary{cursor:pointer;padding:8px 0}.video-advanced .fld{margin:10px 0}
+.video-upload{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;border:1px dashed #c8b5a7;border-radius:var(--radius-sm);padding:26px 12px;background:var(--surface-2);cursor:pointer;margin-top:16px;text-align:center}
+.video-upload svg{width:25px;height:25px;color:var(--brand)}.video-upload strong{font-size:14px;font-weight:500}.video-upload>span{font-size:12px;color:var(--ink-2)}
+.video-upload:hover,.video-upload.is-dragging{background:var(--brand-soft);border-color:var(--brand)}.video-upload:focus-visible,.video-upload:focus-within{outline:2px solid var(--brand);outline-offset:3px}
+.video-assets{list-style:none;padding:0;margin:12px 0}.video-assets li{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line-2);min-width:0}
+.video-asset-thumb{width:42px;height:48px;flex:0 0 42px;border-radius:6px;object-fit:cover;background:var(--surface-2);display:grid;place-items:center;color:var(--brand)}
+.video-asset-name{flex:1;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.video-assets button{flex:0 0 auto;border:0;background:transparent;color:var(--ink-2);cursor:pointer;padding:4px;font-size:12px}.video-assets button:hover{color:var(--brand-ink);background:var(--brand-soft);border-radius:4px}
+.video-settings{display:flex;gap:14px;align-items:end;margin:18px 0 12px}.video-settings .fld{flex:1}.video-settings>.hint{font-size:12px;padding-bottom:8px;white-space:nowrap}
+.video-submitbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 0 20px}.video-submitbar p{font-size:13px;color:var(--ink-2)}.video-submitbar button{flex-shrink:0}
+.video-tasks .empty{margin:16px 0 0}.jy-job{border-top:1px solid var(--line-2);padding:16px 0}.jy-job:first-child{margin-top:14px}.jy-job:last-child{padding-bottom:0}
+.video-job-head{display:flex;align-items:start;justify-content:space-between;gap:12px}.video-job-head h4{font-size:14px}.video-job-meta{font-size:12px;color:var(--ink-2);margin-top:3px}.video-job-status{font-size:12px;padding:3px 9px;border-radius:99px;background:var(--brand-soft);color:var(--brand-ink);white-space:nowrap}.video-job-status.is-failed{background:var(--danger-soft);color:var(--danger)}.video-job-status.is-done{background:var(--ok-soft);color:var(--ok)}
+.video-job-actions{display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap}.video-job-error{font-size:13px;color:var(--danger);margin-top:8px;overflow-wrap:anywhere}.jy-job details{margin-top:12px;font-size:13px;color:var(--ink-2)}.jy-job summary{cursor:pointer}.jy-job code{display:block;overflow-wrap:anywhere;background:var(--surface-2);padding:10px;border-radius:6px;margin:8px 0;font-size:12px}.jy-job video{display:block;max-width:100%;width:260px;max-height:420px;margin-top:12px;border-radius:8px;background:var(--ink)}.video-final-upload{position:relative;cursor:pointer}.video-reconcile{display:flex;gap:8px;margin-top:10px}.video-reconcile input{min-width:0;flex:1;padding:6px 9px;border:1px solid var(--line);border-radius:6px}
+@media(max-width:1100px){.video-layout{grid-template-columns:minmax(0,1fr)}.video-assets-panel{display:block}.video-settings{max-width:400px}}
+@media(max-width:600px){.video-modebar{align-items:start;flex-direction:column;gap:8px}.video-heading .panel-head{align-items:start}.video-submitbar{align-items:stretch;flex-direction:column}.video-job-head{flex-wrap:wrap}.video-settings{align-items:start;flex-direction:column}.video-settings>.hint{padding:0}.video-settings .fld{width:100%}}
+@media(prefers-reduced-motion:reduce){.view{animation:none}.tab,.btn,.chip{transition:none}}
+/* 保持窄屏导航一行可滚动，工具栏不再逐字挤压。 */
+@media(max-width:1080px){.nav .tab{flex:0 0 auto}}
+@media(max-width:600px){
+  .sidenav{gap:8px}.sidenav .brand-mark{width:40px;height:40px;flex-basis:40px;font-size:12px}
+  .side-foot{flex:1;min-width:0;gap:7px;justify-content:flex-end;flex-wrap:nowrap}
+  .side-foot .ops-field{min-width:0}.side-foot .ops-field>span{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  .side-foot .ops-field input{width:80px;padding:7px 8px;font-size:12px}.side-foot .ops-field select{width:112px;padding:7px 5px;font-size:12px}
+  .side-foot .sync{white-space:nowrap;font-size:12px;padding:6px 8px;gap:5px}
+  .sidenav .nav{padding-top:3px}.nav .tab{font-size:13px;padding:5px 8px 5px 6px;gap:5px}.nav .tab em{font-size:11px;padding:1px 6px;min-width:18px}
+}
+@media(max-width:380px){.side-foot .ops-field select{width:96px}.side-foot .sync span{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}}
