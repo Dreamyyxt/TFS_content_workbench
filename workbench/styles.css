@@ -738,31 +738,3 @@ button,input,select{font:inherit;color:inherit}
 .fix-note{font-size:12.5px;color:var(--ok);background:var(--ok-soft);
   border-radius:6px;padding:6px 10px;margin:8px 0 0;line-height:1.7}
 .fix-note.is-partial{color:var(--warn);background:var(--warn-soft)}
-
-/* Production center reuses the workbench palette and controls. */
-.studio-panel{padding:24px;display:flex;flex-direction:column;gap:20px}
-.studio-panel label{display:flex;flex-direction:column;gap:6px;color:var(--ink-2)}
-.studio-panel input,.studio-panel select{max-width:100%;padding:10px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface)}
-.studio-panel form{display:flex;flex-direction:column;gap:16px;max-width:640px}
-.studio-connect{display:flex;align-items:end;gap:12px;flex-wrap:wrap}
-.studio-job{padding:20px 0;border-top:1px solid var(--line)}
-.studio-job video{display:block;width:100%;max-width:270px;max-height:480px;margin:12px 0;background:#000}
-.studio-job pre{overflow:auto;max-height:240px;font-size:13px}
-#studioAssets li{padding:8px 0;overflow-wrap:anywhere}
-#studioNotice{color:var(--ink-2);overflow-wrap:anywhere}
-.studio-panel button:disabled{opacity:.6;cursor:wait}
-.studio-panel :focus-visible{outline:2px solid var(--brand);outline-offset:3px}
-@media(max-width:600px){.studio-panel{padding:16px}.studio-connect>*{width:100%}}
-/* Keep the production form aligned with the workbench content edge. */
-body:has(#view-studio.is-active) #views{max-width:none;margin:0}
-.studio-panel{max-width:1240px}
-.studio-connect[hidden]{display:none}
-.studio-panel form>.btn{align-self:flex-start;min-width:180px}
-#studioDevice{color:var(--brand-ink);font-weight:600}
-@media(max-width:600px){
-  .side-foot{gap:8px;align-items:center;flex-wrap:wrap}
-  .side-foot .ops-field{gap:4px;flex-direction:row;align-items:center;white-space:nowrap}
-  .side-foot .ops-field span{font-size:11px}
-  .side-foot .ops-field input{max-width:100px}
-  .side-foot .sync{white-space:nowrap;flex-shrink:0}
-}

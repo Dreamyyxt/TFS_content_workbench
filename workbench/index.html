@@ -33,7 +33,6 @@
           <span class="nav-txt">拍摄辅助</span>
           <em id="badgeScripts">0</em>
         </button>
-        <button class="tab" data-view="studio"><span class="nav-txt">视频制作</span></button>
         <button class="tab" data-view="schedule">
           <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></span>
           <span class="nav-txt">自动排期</span>
@@ -149,24 +148,6 @@
   </section>
 
   <!-- ============ ② 拍摄辅助 ============ -->
-  <section class="view" id="view-studio">
-    <div class="panel studio-panel">
-      <h2>视频制作中心</h2>
-      <p>美甲作品 · 9:16 · 1080P · 30FPS。保留真实画面，按素材顺序剪辑，当前版本无配乐和字幕。</p>
-      <div class="studio-connect"><label>制作访问令牌 <input id="studioToken" type="password" autocomplete="off" /></label><button class="btn btn-ghost" id="studioConnect" type="button">连接制作服务</button></div>
-      <p id="studioDevice" role="status">正在检查制作服务…</p>
-      <p id="studioNotice" role="status" aria-live="polite">首次使用需配置服务端令牌并启动 Mac 执行器。</p>
-      <form id="studioForm">
-        <label>视频标题 <input id="studioTitle" required maxlength="200" value="美甲作品" /></label>
-        <label>目标时长 <select id="studioDuration"><option value="12">12 秒</option><option value="20" selected>20 秒</option><option value="30">30 秒</option></select></label>
-        <label>上传照片和视频（单个 ≤100MB）<input id="studioFiles" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.m4v" /></label>
-        <ol id="studioAssets"></ol>
-        <button class="btn btn-primary" id="studioSubmit" type="submit">提交剪辑任务</button>
-      </form>
-      <div class="section-head"><h2>制作任务</h2><button class="btn btn-ghost" id="studioRefresh" type="button">刷新进度</button></div>
-      <div id="studioJobs">连接制作服务后显示持久化任务与成片。</div>
-    </div>
-  </section>
   <section class="view" id="view-scripts">
     <div class="split">
       <aside class="col-left">
@@ -410,6 +391,5 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
 <script src="./app.js"></script>
-<script src="./studio.js"></script>
 </body>
 </html>

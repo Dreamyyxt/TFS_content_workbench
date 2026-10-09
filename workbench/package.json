@@ -6,8 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node server.js --check",
-    "studio": "node tools/start-studio.cjs"
+    "check": "node server.js --check"
   },
   "engines": {
     "node": ">=18"

@@ -412,7 +412,7 @@ function initCloud(){
     throw new Error('云 SDK 未加载完成，请刷新页面重试');
   }
   cloud = window.WorkBuddyCloud.createWorkBuddyCloud({
-    endpoint: ['localhost','127.0.0.1'].includes(location.hostname) ? location.origin : PUBLIC_CONFIG.endpoint,
+    endpoint: PUBLIC_CONFIG.endpoint,
     oauthRelayBaseUrl: PUBLIC_CONFIG.oauthRelayBaseUrl,
     publishableKey: PUBLIC_CONFIG.publishableKey
   });
@@ -1423,7 +1423,6 @@ function renderScripts(){
       '<div class="script-preview">' + esc(String(s.content || '').replace(/[#*|]/g,'').slice(0, 260)) + '</div>' +
       '<div class="script-foot">' +
         '<button class="btn btn-primary btn-sm" data-viewscript="' + s.id + '">查看完整脚本</button>' +
-        '<button class="btn btn-ghost btn-sm" data-produce="' + s.id + '">开始制作</button>' +
         (live.hits.length
           ? '<button class="btn btn-fix btn-sm" data-fixscript="' + s.id + '">一键替换禁用词</button>'
           : '') +
@@ -2504,14 +2503,6 @@ function switchView(v){
 }
 
 function bind(){
-  document.addEventListener('click', e => {
-    const button = e.target.closest('[data-produce]');
-    if (!button) return;
-    const script = S.scripts.find(s => String(s.id) === button.dataset.produce);
-    if (!script) return;
-    switchView('studio');
-    window.dispatchEvent(new CustomEvent('studio-script', {detail:{script_id:script.id, content_id:script.material_id != null ? 'material:' + script.material_id : 'script:' + script.id, title:script.title, account:script.account}}));
-  });
   $('#tabs').addEventListener('click', e => {
     const t = e.target.closest('.tab'); if (t) switchView(t.dataset.view);
   });
@@ -2723,7 +2714,7 @@ function renderAll(){
 }
 
 async function boot(){
-  try{ bind(); if(location.hash === '#studio') switchView('studio'); }
+  try{ bind(); }
   catch(err){ console.error('[工作台] 事件绑定失败', err); }
   try{
     setSync('连接中', 'is-busy');

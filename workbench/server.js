@@ -39,12 +39,7 @@ const zlib = require('zlib');
 const { URL } = require('url');
 
 const ROOT = __dirname;
-const videoAPI = require('./video-api').createVideoAPI({
-  dir: process.env.VIDEO_DATA_DIR || path.join(__dirname, '..', '.video-data'),
-  userToken: process.env.VIDEO_USER_TOKEN, agentToken: process.env.VIDEO_AGENT_TOKEN
-});
 const PORT = Number(process.env.PORT || 3000);
-const HOST = process.env.VIDEO_LOCAL === '1' ? '127.0.0.1' : process.env.HOST || '0.0.0.0';
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
            '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
@@ -820,34 +815,6 @@ const server = http.createServer(async (req, res) => {
     /* 忽略 */
   }
 
-  // The local companion never listens on a public interface. Cloud calls retain
-  // the existing app origin, whose allowlist otherwise rejects localhost.
-  if (process.env.VIDEO_LOCAL === '1' && pathname === '/api/video/local-session') {
-    const host = String(req.headers.host || '').split(':')[0];
-    const origin = req.headers.origin;
-    if (!['localhost','127.0.0.1'].includes(host) || req.headers['x-local-studio'] !== '1' ||
-        (origin && origin !== 'http://' + req.headers.host)) return sendJson(res, 403, {error:'仅允许本机工作台连接'});
-    return sendJson(res, 200, {token:process.env.VIDEO_USER_TOKEN});
-  }
-  if (process.env.VIDEO_LOCAL === '1' && pathname.startsWith('/.cloud/')) {
-    if (!['localhost','127.0.0.1'].includes(String(req.headers.host || '').split(':')[0]) ||
-        (req.headers.origin && req.headers.origin !== 'http://' + req.headers.host)) {
-      res.writeHead(403); return res.end('forbidden');
-    }
-    const headers = {...req.headers, host:'nail-content-workbench.app.workbuddy.host',
-      origin:'https://nail-content-workbench.app.workbuddy.host', referer:'https://nail-content-workbench.app.workbuddy.host/'};
-    delete headers.connection;
-    const upstream = https.request('https://nail-content-workbench.app.workbuddy.host' + req.url,
-      {method:req.method,headers}, response => {
-        const out={...response.headers}; delete out['access-control-allow-origin']; delete out['set-cookie'];
-        res.writeHead(response.statusCode,out); response.pipe(res);
-      });
-    upstream.setTimeout(30000,()=>upstream.destroy(Error('云服务请求超时')));
-    upstream.on('error',()=>{if(!res.headersSent) sendJson(res,502,{error:'云服务连接失败'});else res.destroy();});
-    req.pipe(upstream);return;
-  }
-  if (await videoAPI(req, res, new URL(req.url, 'http://localhost'))) return;
-
   if (pathname === '/api/health') {
     return sendJson(res, 200, { ok: true, service: 'nail-content-workbench', time: new Date().toISOString() });
   }
@@ -920,7 +887,7 @@ if (require.main === module) {
         process.exit(1);
       });
   } else {
-    server.listen(PORT, HOST, () => {
+    server.listen(PORT, '0.0.0.0', () => {
       console.log('工作台已启动： http://localhost:' + PORT);
     });
   }
