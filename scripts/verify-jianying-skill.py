@@ -8,6 +8,7 @@ import sys
 from datetime import datetime
 
 parser = argparse.ArgumentParser()
+parser.add_argument('--draft-root', help='Explicit draft root; default is isolated in this workspace')
 parser.add_argument('photos', nargs='+', help='Existing local photos for the compatibility check')
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[1]
@@ -26,7 +27,8 @@ if sys.platform == 'darwin':
 from jy_wrapper import JyProject
 
 # An explicit isolated root avoids modifying existing Jianying projects.
-drafts = root / 'outputs/jianying-skill-check'
+drafts = Path(args.draft_root).expanduser().resolve() if args.draft_root else root / 'outputs/jianying-skill-check'
+(root / 'outputs/jianying-skill-check').mkdir(parents=True, exist_ok=True)
 name = '第五季-剪映Skill验证-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f')
 project = JyProject(name, width=1080, height=1920, drafts_root=str(drafts), overwrite=False)
 for i, photo in enumerate(photos):

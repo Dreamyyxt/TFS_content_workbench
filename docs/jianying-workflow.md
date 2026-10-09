@@ -9,8 +9,8 @@ https://github.com/luoluoluo22/jianying-editor-skill
 - 已成功通过 `from jy_wrapper import JyProject` 加载上游 API。
 - 已使用上游 API 导入两张真实门店照片、添加标题并保存独立测试工程，校验到两个视频片段、1080×1920 画布、draft_info.json 与 draft_meta_info.json。
 - 测试工程及报告位于 `outputs/jianying-skill-check/`，未提交 Git。
-- `/Applications` 和 `~/Applications` 未找到国内剪映专业版应用。本机仅有草稿根目录，不能据此声称已安装剪映或已打开工程。
-- 尚未验证剪映应用打开、字体/效果显示和 MP4 导出。
+- 经用户纠正并核对 Info.plist，已确认本机剪映路径为 `/Applications/VideoFusion-macOS.app`，Bundle ID `com.lemon.lvpro`，版本 11.5.3。应用内标题为“剪映专业版”；先前仅按文件名查找导致误判，现已修正。
+- 已在剪映首页通过“文件 → 找回草稿”识别到 Skill 生成的独立测试工程，并实际打开编辑器；图片预览、标题、视频和文本轨道均正常显示。基础草稿与剪映 11.5.3 的兼容性已验证。复杂效果、配音与转场尚未在此测试中覆盖；未执行 MP4 导出。
 
 ## 新的工作流
 
@@ -40,4 +40,4 @@ PYTHONDONTWRITEBYTECODE=1 /Users/dreamyyxt/.workbuddy/binaries/python/envs/defau
   scripts/verify-jianying-skill.py /absolute/photo1.jpg /absolute/photo2.jpg
 ```
 
-后续安装国内剪映专业版后，应先记录实际应用版本并完成工程打开验收，再将工程保存到剪映实际使用的草稿目录。不向未验证的目录写入生产工程。
+已使用上游自带 cover.png 在实际草稿根目录生成唯一命名的应用兼容性测试工程，不覆盖原工程；原照片测试工程仍保存在项目输出目录。诊断脚本默认使用隔离目录，也支持通过 --draft-root 明确指定目录。
