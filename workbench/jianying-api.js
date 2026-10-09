@@ -157,6 +157,11 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
         const job=state.jobs.find(j=>j.id===retry[1]);
         if (!job) fail(404,'任务不存在');
         if (job.status!=='failed') fail(409,'只有失败任务可以重试');
+        const retryOptions=await json(req);
+        if(job.mode==='generate' && retryOptions.model && (!job.remote_id || job.remote_failed)){
+          if(!/^(doubao-seedance-2-[\w-]+|ep-[\w-]+)$/.test(String(retryOptions.model)))fail(400,'请选择可用的火山视频模型');
+          job.model=retryOptions.model;
+        }
         if(job.remote_failed){delete job.remote_id;delete job.remote_status;delete job.remote_failed;}
         job.status=job.mode==='generate' && job.remote_id?'generating':'queued';job.error='';save();send(res,200,{ok:true});return true;
       }

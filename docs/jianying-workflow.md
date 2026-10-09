@@ -36,7 +36,7 @@
 
 密钥仅由服务端读取 `~/.workbuddy/volc_mediakit.key`，可用 `ARK_API_KEY` 环境变量覆盖；不进入网页、Git 或日志。虽文件名含 MediaKit，当前存放的是方舟凭证；已实测 MediaKit 不接受，而方舟鉴权成功。直接使用 `https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks`，按官方流程创建、查询并下载结果。
 
-- 默认 Seedance2.0 Fast，可在“字幕与更多设置”选择2.0、2.0 Mini或2.5。
+- 默认使用用户已开通的 Doubao-Seedance-2.0（`doubao-seedance-2-0-260128`），可在“字幕与更多设置”选择 Fast、Mini或2.5。之前因 Fast 未开通而失败的任务，可以用当前选择的模型重试。
 - 竖屏9:16、720P，5/10/15秒；脚本与生成要求组成提示词，要求生成音频。
 - 无需素材；可选最多9张参考照片，单张<30MB、合计≤40MB，通过 Base64 传入。视频参考使用 HTTPS 公网链接，最多3段（2.0 总时长≤15秒）；本地视频用于剪辑，不能直接作为生成参考。
 - 图片/视频须满足所选模型的格式、尺寸和内容限制，最终以 API 校验为准。字幕要求由模型尝试呈现，不承诺逐字准确。

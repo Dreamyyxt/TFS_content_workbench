@@ -76,7 +76,7 @@
       const status=document.createElement('span');status.className='video-job-status'+(['failed','submission_unknown'].includes(job.status)?' is-failed':['finished','draft_ready'].includes(job.status)?' is-done':'');status.textContent=labels[job.status] || job.status;head.append(status);card.append(head);
       if(job.error){const p=document.createElement('p');p.className='video-job-error';p.textContent=/has not activated/i.test(job.error)?'尚未开通所选火山视频模型，请在方舟控制台开通后重试，或选择已开通的模型。':job.error;card.append(p);if(job.mode==='generate' && /has not activated|尚未开通|权限不足/.test(job.error)){const a=document.createElement('a');a.href='https://ark.console.volcengine.com/';a.target='_blank';a.rel='noopener';a.className='btn btn-ghost btn-sm';a.textContent='打开火山方舟控制台';card.append(a);}}
       const actions=document.createElement('div');actions.className='video-job-actions';card.append(actions);
-      if(job.status==='failed')actions.append(button(job.remote_id&&!job.remote_failed?'继续查询 / 下载':'重试',async()=>{await post('jobs/'+job.id+'/retry',{});await refresh();}));
+      if(job.status==='failed')actions.append(button(job.remote_id&&!job.remote_failed?'继续查询 / 下载':job.mode==='generate'?'用当前模型重试':'重试',async()=>{await post('jobs/'+job.id+'/retry',job.mode==='generate'?{model:$('jyModel').value}:{});await refresh();}));
       if(job.status==='submission_unknown'){
         const form=document.createElement('div');form.className='video-reconcile';const input=document.createElement('input');input.placeholder='控制台中的 cgt- 任务 ID';input.setAttribute('aria-label','火山任务 ID');form.append(input,button('继续查询',async()=>{await post('jobs/'+job.id+'/reconcile',{remote_id:input.value.trim()});await refresh();}));card.append(form);
       }

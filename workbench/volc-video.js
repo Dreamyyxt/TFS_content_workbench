@@ -2,7 +2,7 @@
 const fs=require('node:fs');const path=require('node:path');const os=require('node:os');
 const {pipeline}=require('node:stream/promises');const {Readable,Transform}=require('node:stream');
 const BASE='https://ark.cn-beijing.volces.com/api/v3';
-const DEFAULT_MODEL='doubao-seedance-2-0-fast-260128';
+const DEFAULT_MODEL='doubao-seedance-2-0-260128';
 function createVolcClient({keyFile=path.join(os.homedir(),'.workbuddy/volc_mediakit.key'),fetchImpl=fetch}={}) {
   const key=()=>{const value=(process.env.ARK_API_KEY || (fs.existsSync(keyFile)?fs.readFileSync(keyFile,'utf8'):'')).trim();if(!value)throw Error('未配置火山方舟密钥，请检查 ~/.workbuddy/volc_mediakit.key');return value;};
   async function request(route,body) {
