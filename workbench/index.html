@@ -33,6 +33,7 @@
           <span class="nav-txt">拍摄辅助</span>
           <em id="badgeScripts">0</em>
         </button>
+        <button class="tab" data-view="video"><span class="nav-txt">视频制作</span></button>
         <button class="tab" data-view="schedule">
           <span class="nav-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></span>
           <span class="nav-txt">自动排期</span>
@@ -174,6 +175,30 @@
   </section>
 
   <!-- ============ ③ 自动排期 ============ -->
+  <section class="view" id="view-video">
+    <div class="panel jy-studio">
+      <p class="hint">内容生产 / 03</p><h2>视频制作中心</h2>
+      <p>带入拍摄脚本，上传真实素材，生成可继续编辑的剪映工程。</p>
+      <p id="jyStatus" role="status">请启动 Mac 剪映连接器，再连接。</p>
+      <button class="btn btn-ghost" id="jyConnect">连接 Mac 剪映</button>
+      <form id="jyForm">
+        <label>视频标题<input id="jyTitle" required maxlength="150" value="美甲作品"></label>
+        <p id="jySource" class="hint">独立制作 · 也可从拍摄辅助的脚本进入</p>
+        <label>导入脚本（TXT / Markdown）<input id="jyImport" type="file" accept=".txt,.md"></label>
+        <label>拍摄脚本<textarea id="jyScript" rows="7" maxlength="30000" placeholder="粘贴已确认的脚本；原文会随工程保存，供剪映中继续制作"></textarea></label>
+        <label>画面字幕（可选，每行一句，按时长平均分配）<textarea id="jyCaptions" rows="3" maxlength="2000"></textarea></label>
+        <label>制作备注<textarea id="jyNotes" rows="2" maxlength="4000" placeholder="备注会保存在工程内，供人工调整；当前不会自动理解任意剪辑指令"></textarea></label>
+        <label>目标时长<select id="jyDuration"><option value="12">12 秒</option><option value="20" selected>20 秒</option><option value="30">30 秒</option></select></label>
+        <p class="hint">9:16 · 1080P · 30FPS。按素材顺序剪辑，视频从开头截取；短视频不足时由照片补足，没有照片则提示补充素材。音乐在剪映中添加。</p>
+        <label>上传照片和视频（单个 ≤100MB，最多30个）<input id="jyFiles" type="file" multiple accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.m4v"></label>
+        <ol id="jyAssets"></ol>
+        <button class="btn btn-primary" id="jySubmit" type="submit">生成剪映工程</button>
+        <p id="jyMessage" role="status"></p>
+      </form>
+      <h3>制作任务</h3><button class="btn btn-ghost" id="jyRefresh">刷新进度</button>
+      <div id="jyJobs"><p class="hint">连接后显示本机保存的任务。</p></div>
+    </div>
+  </section>
   <section class="view" id="view-schedule">
     <div class="panel">
       <div class="panel-head">
@@ -391,5 +416,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
 <script src="./app.js"></script>
+<script src="./jianying-studio.js"></script>
 </body>
 </html>

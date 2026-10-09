@@ -39,6 +39,11 @@ const zlib = require('zlib');
 const { URL } = require('url');
 
 const ROOT = __dirname;
+const JY_LOCAL = process.env.JY_LOCAL === '1';
+const jianyingAPI = JY_LOCAL ? require('./jianying-api').createJianyingAPI({
+  dir: process.env.JY_DATA_DIR || path.join(ROOT, '../.jianying-data'),
+  userToken: process.env.JY_USER_TOKEN, workerToken: process.env.JY_WORKER_TOKEN, local:true
+}) : null;
 const PORT = Number(process.env.PORT || 3000);
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
            '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -815,6 +820,23 @@ const server = http.createServer(async (req, res) => {
     /* 忽略 */
   }
 
+  if (jianyingAPI && await jianyingAPI(req, res, new URL(req.url, 'http://localhost'))) return;
+
+  if (JY_LOCAL && pathname.startsWith('/.cloud/')) {
+    if (req.headers.origin && req.headers.origin !== 'http://' + req.headers.host) {
+      res.writeHead(403); return res.end();
+    }
+    const headers = {...req.headers, host:'nail-content-workbench.app.workbuddy.host', origin:'https://nail-content-workbench.app.workbuddy.host'};
+    delete headers.connection;
+    const upstream = https.request({hostname:'nail-content-workbench.app.workbuddy.host',path:req.url.slice('/.cloud'.length),method:req.method,headers}, response => {
+      const responseHeaders = {...response.headers};
+      delete responseHeaders['access-control-allow-origin'];
+      res.writeHead(response.statusCode, responseHeaders); response.pipe(res);
+    });
+    upstream.setTimeout(30000,()=>upstream.destroy());
+    upstream.on('error',()=>{if(!res.headersSent)res.writeHead(502);res.end();});
+    req.pipe(upstream);return;
+  }
   if (pathname === '/api/health') {
     return sendJson(res, 200, { ok: true, service: 'nail-content-workbench', time: new Date().toISOString() });
   }
@@ -887,7 +909,7 @@ if (require.main === module) {
         process.exit(1);
       });
   } else {
-    server.listen(PORT, '0.0.0.0', () => {
+    server.listen(PORT, JY_LOCAL ? '127.0.0.1' : '0.0.0.0', () => {
       console.log('工作台已启动： http://localhost:' + PORT);
     });
   }

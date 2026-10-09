@@ -10,7 +10,7 @@
    1. 云服务公开配置（来自云服务开通结果 publicConfig，非敏感）
    --------------------------------------------------------------------- */
 const PUBLIC_CONFIG = {
-  endpoint: 'https://nail-content-workbench.app.workbuddy.host',
+  endpoint: ['127.0.0.1','localhost'].includes(location.hostname) && location.port === '4191' ? location.origin + '/.cloud' : 'https://nail-content-workbench.app.workbuddy.host',
   oauthRelayBaseUrl: 'https://www.workbuddy.cn/v2/as/genie-baas/oauth',
   publishableKey: 'wbpk_OVXOIXh914a31yrMdLVAOD_vVWHCEtJ7W8GiGLp4CP8kIVt3PSSe78C'
 };
@@ -1422,6 +1422,7 @@ function renderScripts(){
       '</div>' +
       '<div class="script-preview">' + esc(String(s.content || '').replace(/[#*|]/g,'').slice(0, 260)) + '</div>' +
       '<div class="script-foot">' +
+        '<button class="btn btn-primary btn-sm" data-makevideo="' + esc(s.id) + '">开始制作</button>' +
         '<button class="btn btn-primary btn-sm" data-viewscript="' + s.id + '">查看完整脚本</button>' +
         (live.hits.length
           ? '<button class="btn btn-fix btn-sm" data-fixscript="' + s.id + '">一键替换禁用词</button>'
@@ -2750,5 +2751,15 @@ async function boot(){
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
 else boot();
+
+// Preserve the script/material relationship when entering video production.
+document.addEventListener('click', e => {
+  const button=e.target.closest('[data-makevideo]');
+  if (!button) return;
+  const script=S.scripts.find(s=>String(s.id)===button.dataset.makevideo);
+  if (!script) return;
+  switchView('video');
+  window.dispatchEvent(new CustomEvent('jianying-script',{detail:script}));
+});
 
 })();

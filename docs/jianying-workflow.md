@@ -1,43 +1,44 @@
-# 第五季：剪映 Skill 制作流程
+# 第五季：网页 → 剪映 Skill
 
-用户于 2026-10-10 要求删除自建视频制作方案，改用：
-https://github.com/luoluoluo22/jianying-editor-skill
+## 完整业务流程
 
-## 当前状态
+风口采集/选题 → 拍摄辅助生成脚本 → 视频制作 → 剪映预览精修/导出 → 上传成片。
+原来的选题、脚本、排期与复盘模块保留。脚本卡片的“开始制作”带入标题、脚本、账号、脚本 ID 与素材主题 ID；也支持独立制作、导入 TXT/Markdown。
 
-- 已安装上游 `jianying-editor` v1.7.0 到 `~/.codex/skills/jianying-editor`；下一个对话回合可自动发现该技能。
-- 已成功通过 `from jy_wrapper import JyProject` 加载上游 API。
-- 已使用上游 API 导入两张真实门店照片、添加标题并保存独立测试工程，校验到两个视频片段、1080×1920 画布、draft_info.json 与 draft_meta_info.json。
-- 测试工程及报告位于 `outputs/jianying-skill-check/`，未提交 Git。
-- 经用户纠正并核对 Info.plist，已确认本机剪映路径为 `/Applications/VideoFusion-macOS.app`，Bundle ID `com.lemon.lvpro`，版本 11.5.3。应用内标题为“剪映专业版”；先前仅按文件名查找导致误判，现已修正。
-- 已在剪映首页通过“文件 → 找回草稿”识别到 Skill 生成的独立测试工程，并实际打开编辑器；图片预览、标题、视频和文本轨道均正常显示。基础草稿与剪映 11.5.3 的兼容性已验证。复杂效果、配音与转场尚未在此测试中覆盖；未执行 MP4 导出。
+## 启动与使用
 
-## 新的工作流
+1. 双击项目根目录 `启动剪映制作.command`，或在 workbench 运行 `npm run jianying`。保持终端运行。
+2. 打开 http://127.0.0.1:4191 ，进入“视频制作”，点击“连接 Mac 剪映”。本地工作台的原业务数据仍使用既有 WorkBuddy 云服务。
+3. 导入/粘贴脚本，上传照片与视频，调整素材顺序，选择12/20/30秒，可填逐行字幕。
+4. 提交后，本机 Python 执行器直接调用已安装的上游 `JyProject`，生成唯一名称的剪映工程并回报路径。
+5. 剪映“文件 → 找回草稿”选择该工程文件夹；预览、调整并在剪映内导出 MP4。
+6. 在对应网页任务上传导出的 MP4，随后可预览成片。
 
-1. 在 Codex 中提供素材路径、脚本和想要的剪辑风格，调用 jianying-editor Skill。
-2. 根据具体内容编写业务剪辑脚本，直接调用 Skill 的 JyProject 接口导入素材、配置剪辑、字幕、配乐及转场。
-3. 通过 project.save() 保存可编辑剪映工程，检查素材路径与轨道。
-4. 在国内桌面剪映专业版中打开工程、预览和精修。
-5. 在剪映内导出 MP4。上游 macOS 不支持自动 UI 导出。
+已发布的新版网页也可连接本机4191；浏览器需要允许访问本地网络。此版本尚未通过原 WorkBuddy 发布流程部署，公网跨域/本地网络许可尚待上线实测。
 
-依赖 FFmpeg/FFprobe 时，仅作为上游 Skill 的媒体解析/兼容辅助，不运行此前的独立成片服务。
+## P0 剪辑规则与范围
 
-## 已清理的旧方案
+- 1080×1920、默认30FPS，保留原始素材画面；不生成作品图像。
+- 顺序排列，每段先分配相同时长。视频从开头截取，短视频不循环，照片补足剩余时长；只有短视频且不足目标时长时失败并提示补充素材。
+- 单独填写的字幕按总时长平均分配；拍摄脚本不是自动逐字字幕。
+- 脚本与备注随工程保存在 `production-notes.md`；当前不会自动分析分镜或执行任意自然语言修改。配乐、复杂转场、精细镜头选择在剪映中处理。
+- Mac MP4 导出在剪映应用内完成，不声称上游支持 Mac 自动导出。
+- 制作任务/素材/成片保存在项目 `.jianying-data/`，工程保存在剪映草稿目录；不要删除这些原始素材，工程引用需要它们。没有将制作任务自动同步到云数据库或排期/复盘表。
 
-停止原 4191 端口服务及执行器；撤除自建制作页面、队列 API、自动配对代理、FFmpeg 执行器、启动器及相关测试/说明。
-同时移除旧卡点成片、品牌视频素材生成、自制剪映草稿生成、模板换素材、MediaKit 云端成片工具及入口说明。
-原工作台选题、脚本、排期、风向和数据功能恢复到新增制作模块前的代码。
-非视频 Skill 不受影响；历史素材、MP4、草稿、`.video-data/` 和其他用户修改全部保留。
-旧公网站点需要通过原 WorkBuddy 发布流程更新，此次未冒称已清理线上部署。
+## 架构与依赖
 
-## 诊断脚本（仅验证上游，不是新的制作引擎）
+零依赖 Node18+ 本地连接器仅监听127.0.0.1；网页使用临时浏览器令牌，执行器使用独立令牌。只允许既有生产域名及本机页面跨域连接。队列持久化、任务领取凭据、心跳与失联后手动重试避免旧执行器覆盖新结果。
 
-`scripts/verify-jianying-skill.py` 创建唯一命名的隔离草稿，不覆盖已有剪映工程，也不渲染 MP4。
-目前验证使用的 Python 环境：
+业务脚本 `scripts/jianying-worker.py` 调用 https://github.com/luoluoluo22/jianying-editor-skill 的高层接口；不修改 Skill，也不使用自建 FFmpeg 成片引擎。FFprobe 仅由上游函数读取视频时长。
 
-```sh
-PYTHONDONTWRITEBYTECODE=1 /Users/dreamyyxt/.workbuddy/binaries/python/envs/default/bin/python \
-  scripts/verify-jianying-skill.py /absolute/photo1.jpg /absolute/photo2.jpg
-```
+可配置 `JY_SKILL_ROOT`、`JY_PYTHON`、`JY_DRAFT_ROOT`、`JY_DATA_DIR`。默认 Python 优先使用当前可加载 Skill 的 WorkBuddy Python 环境，其次python3。默认草稿路径由 Skill 检测。
 
-已使用上游自带 cover.png 在实际草稿根目录生成唯一命名的应用兼容性测试工程，不覆盖原工程；原照片测试工程仍保存在项目输出目录。诊断脚本默认使用隔离目录，也支持通过 --draft-root 明确指定目录。
+## 已验证与未验证
+
+- 上游 Skill1.7.0 已安装并可加载。
+- 本机剪映是 `/Applications/VideoFusion-macOS.app`，版本11.5.3；已实际打开上游诊断工程，图片、标题和轨道正常。复杂效果尚未验收。
+- 浏览器端已实际导入 Markdown、上传上游cover.png、提交20秒任务，执行器生成原生草稿，网页回传工程路径，浏览器无脚本错误。此次网页工程未另行在应用中打开或导出。
+- API测试通过：来源限制、角色鉴权、重复提交去重、过期领取隔离、失败重试。
+- 公网发布、Mac浏览器公网到本机连接、混合视频输入、MP4实际导出和回传尚待验收，不标记完成。
+
+旧 FFmpeg/MediaKit 等竞争成片工具已撤除；历史素材、MP4、草稿和 `.video-data/` 保留。诊断脚本 `scripts/verify-jianying-skill.py` 仍可用于独立兼容性检查。
