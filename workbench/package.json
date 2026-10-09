@@ -1,0 +1,14 @@
+{
+  "name": "nail-content-workbench",
+  "version": "1.1.0",
+  "private": true,
+  "description": "第五季美甲美睫 · 内容工作台（静态页面 + 联网采集接口）",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node server.js --check"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
