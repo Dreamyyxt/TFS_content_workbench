@@ -3,6 +3,9 @@ const fs=require('node:fs');const path=require('node:path');const os=require('no
 const {pipeline}=require('node:stream/promises');const {Readable,Transform}=require('node:stream');
 const BASE='https://ark.cn-beijing.volces.com/api/v3';
 const DEFAULT_MODEL='doubao-seedance-2-0-260128';
+function buildGenerationPrompt(job){
+  return '根据以下已确认的拍摄脚本创作竖屏视频。遵循镜头顺序、主体和画面要求。\n标题：'+job.title+'\n拍摄脚本：\n'+job.script+'\n补充要求：\n'+job.instructions+(job.captions?'\n画面文字要求：\n'+job.captions:'');
+}
 function createVolcClient({keyFile=path.join(os.homedir(),'.workbuddy/volc_mediakit.key'),fetchImpl=fetch}={}) {
   const key=()=>{const value=(process.env.ARK_API_KEY || (fs.existsSync(keyFile)?fs.readFileSync(keyFile,'utf8'):'')).trim();if(!value)throw Error('未配置火山方舟密钥，请检查 ~/.workbuddy/volc_mediakit.key');return value;};
   async function request(route,body) {
@@ -23,7 +26,7 @@ function createVolcClient({keyFile=path.join(os.homedir(),'.workbuddy/volc_media
   return {
     async capabilities(){try{const data=await request('/models');return {ready:true,model:DEFAULT_MODEL,models:(data.data || []).filter(m=>/seedance-2-/.test(m.id)).map(m=>m.id)};}catch(e){return {ready:false,error:e.message,model:DEFAULT_MODEL};}},
     async submit(job,dir){
-      const prompt='根据以下已确认的拍摄脚本创作竖屏视频。遵循镜头顺序、主体和画面要求。\n标题：'+job.title+'\n拍摄脚本：\n'+job.script+'\n补充要求：\n'+job.instructions+(job.captions?'\n画面文字要求：\n'+job.captions:'');
+      const prompt=job.submitted_prompt || buildGenerationPrompt(job);
       const content=[{type:'text',text:prompt}];
       for(const asset of job.assets){
         if(asset.type!=='image')throw Error('AI 生成的本地参考素材请使用照片；视频参考请填写公网视频链接。');
@@ -51,4 +54,4 @@ function createVolcClient({keyFile=path.join(os.homedir(),'.workbuddy/volc_media
     }
   };
 }
-module.exports={createVolcClient,DEFAULT_MODEL};
+module.exports={createVolcClient,DEFAULT_MODEL,buildGenerationPrompt};

@@ -14,7 +14,7 @@ const job=await(await s.request('jobs',params)).json();assert.ok(job.id);
 await wait(async()=>{const jobs=await(await s.request('jobs')).json();return jobs[0].status==='finished';});
 assert.equal((await(await s.request('jobs',params)).json()).id,job.id);assert.equal(submissions,1);
 const range=await fetch(s.base+'jobs/'+job.id+'/final',{headers:{Authorization:'Bearer user',Range:'bytes=4-7'}});assert.equal(range.status,206);assert.equal(await range.text(),'ftyp');
-assert.equal(JSON.parse(fs.readFileSync(path.join(s.dir,'state.json'))).jobs[0].remote_id,'cgt-test');
+const saved=JSON.parse(fs.readFileSync(path.join(s.dir,'state.json'))).jobs[0];assert.equal(saved.remote_id,'cgt-test');assert.match(saved.submitted_prompt,/微距作品展示/);assert.ok(saved.last_checked_at);assert.ok(saved.query_count>0);
 }finally{await s.close();}});
 test('uncertain POST is never automatically retried; reconciliation resumes existing task',async()=>{let attempts=0;const s=await setup({async submit(){attempts++;throw Object.assign(Error('unknown'),{uncertain:true});},async get(){return {status:'failed',error:{message:'provider failed'}};}});
 try{const job=await(await s.request('jobs',params)).json();await wait(async()=>{const j=(await(await s.request('jobs')).json())[0];return j.status==='submission_unknown';});await new Promise(r=>setTimeout(r,40));assert.equal(attempts,1);assert.equal((await s.request('jobs/'+job.id+'/retry',{})).status,409);assert.equal((await s.request('jobs/'+job.id+'/reconcile',{remote_id:'cgt-existing'})).status,200);await wait(async()=>{const j=(await(await s.request('jobs')).json())[0];return j.status==='failed' && j.remote_id==='cgt-existing';});assert.equal(attempts,1);}finally{await s.close();}});

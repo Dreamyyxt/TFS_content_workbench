@@ -67,13 +67,40 @@
   function button(label,fn){const b=document.createElement('button');b.type='button';b.className='btn btn-ghost btn-sm';b.textContent=label;b.onclick=async()=>{b.disabled=true;try{await fn();}catch(e){message(e.message,true);}finally{b.disabled=false;}};return b;}
   async function output(job){if(!outputs.has(job.id)){const blob=await(await api('jobs/'+job.id+'/final')).blob();outputs.set(job.id,URL.createObjectURL(blob));}return outputs.get(job.id);}
   function renderJobs(jobs){
-    const signature=JSON.stringify(jobs.map(({lease_until,...job})=>job));if(signature===jobsSignature)return;jobsSignature=signature;
-    $('jyJobs').replaceChildren();$('badgeVideo').textContent=jobs.length;$('badgeVideo').dataset.zero=jobs.length?'0':'1';
-    if(!jobs.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='还没有制作任务。提交后会在这里显示进度和结果。';$('jyJobs').append(empty);return;}
+    const tick=jobs.some(j=>['queued','submitting','generating','downloading'].includes(j.status))?Math.floor(Date.now()/5000):'';
+    const signature=JSON.stringify(jobs.map(({lease_until,...job})=>job))+tick;if(signature===jobsSignature)return;jobsSignature=signature;
+    const previous=new Map([...$('jyJobs').querySelectorAll('.jy-job')].map(card=>[card.dataset.jobId,card]));
+    const cards=[];
+    $('badgeVideo').textContent=jobs.length;$('badgeVideo').dataset.zero=jobs.length?'0':'1';
+    if(!jobs.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='还没有制作任务。提交后会在这里显示进度和结果。';$('jyJobs').replaceChildren(empty);return;}
     for(const job of [...jobs].reverse()){
-      const card=document.createElement('article');card.className='jy-job';const head=document.createElement('div');head.className='video-job-head';const info=document.createElement('div'),title=document.createElement('h4');title.textContent=job.title;info.append(title);
+      const oldCard=previous.get(job.id),cardSignature=JSON.stringify(job)+(['queued','submitting','generating','downloading'].includes(job.status)?tick:'');
+      if(oldCard?.dataset.signature===cardSignature){cards.push(oldCard);continue;}
+      const opened=new Set(oldCard?[...oldCard.querySelectorAll('details[open]')].map(d=>d.dataset.section):[]);
+      const card=document.createElement('article');card.className='jy-job';card.dataset.jobId=job.id;card.dataset.signature=cardSignature;const head=document.createElement('div');head.className='video-job-head';const info=document.createElement('div'),title=document.createElement('h4');title.textContent=job.title;info.append(title);
       const summary=document.createElement('p');summary.className='video-job-meta';summary.textContent=(job.mode==='generate'?'AI 生成':'剪映剪辑')+' · '+job.duration+' 秒 · '+(job.assets.length+(job.reference_videos || []).length)+' 个素材'+(job.script_id?' · 关联拍摄脚本':'');info.append(summary);head.append(info);
       const status=document.createElement('span');status.className='video-job-status'+(['failed','submission_unknown'].includes(job.status)?' is-failed':['finished','draft_ready'].includes(job.status)?' is-done':'');status.textContent=labels[job.status] || job.status;head.append(status);card.append(head);
+      if(job.mode==='generate'){
+        const active=['queued','submitting','generating','downloading'].includes(job.status);
+        const progress=document.createElement('div');progress.className='video-progress';
+        const stages=['等待提交','火山生成','取回文件','可预览'];
+        const step=job.status==='finished'?3:job.status==='downloading'?2:job.remote_id?1:0;
+        const list=document.createElement('ol');list.setAttribute('aria-label','制作阶段');
+        stages.forEach((label,i)=>{const li=document.createElement('li');li.textContent=label;li.className=i<step?'is-complete':i===step?'is-current':'';if(i===step)li.setAttribute('aria-current','step');list.append(li);});progress.append(list);
+        const detail=document.createElement('p');detail.className='video-progress-detail';
+        const seconds=Math.max(0,Math.floor((Date.parse(job.finished_at || new Date().toISOString())-Date.parse(job.created_at))/1000));
+        const elapsed=seconds<60?seconds+'秒':Math.floor(seconds/60)+'分'+seconds%60+'秒';
+        const remote={queued:'火山排队中',running:'火山正在生成画面与声音',succeeded:'火山生成成功',failed:'火山生成失败',expired:'火山任务已过期',cancelled:'任务已取消'};
+        detail.textContent=(remote[job.remote_status] || labels[job.status])+' · '+(active?'已等待 ':'总耗时 ')+elapsed+(job.last_checked_at?' · 最近查询 '+new Date(job.last_checked_at).toLocaleTimeString('zh-CN',{hour12:false}):'');
+        progress.append(detail);
+        if(active){const note=document.createElement('p');note.className='hint';note.textContent='每5秒自动查询。火山未提供完成百分比，当前显示真实阶段。';progress.append(note);}
+        card.append(progress);
+        const promptDetails=document.createElement('details');promptDetails.dataset.section='prompt';promptDetails.open=opened.has('prompt');
+        const promptSummary=document.createElement('summary');promptSummary.textContent='查看提交 Prompt 与参数';promptDetails.append(promptSummary);
+        const params=document.createElement('p');params.className='video-prompt-meta';params.textContent='模型：'+job.model+' · 9:16 · 720P · '+job.duration+'秒 · 生成声音'+(job.remote_id?'\n火山任务 ID：'+job.remote_id:'')+'\n参考照片：'+job.assets.length+'张 · 参考视频：'+(job.reference_videos || []).length+'段';promptDetails.append(params);
+        if(!job.prompt_recorded){const note=document.createElement('p');note.className='hint';note.textContent='此任务未留存提交时的 Prompt，下方按相同模板和已保存输入还原。';promptDetails.append(note);}
+        const pre=document.createElement('pre');pre.className='video-prompt';pre.textContent=job.submitted_prompt || '';promptDetails.append(pre,button('复制 Prompt',()=>navigator.clipboard.writeText(job.submitted_prompt || '')));card.append(promptDetails);
+      }
       if(job.error){const p=document.createElement('p');p.className='video-job-error';p.textContent=/has not activated/i.test(job.error)?'尚未开通所选火山视频模型，请在方舟控制台开通后重试，或选择已开通的模型。':job.error;card.append(p);if(job.mode==='generate' && /has not activated|尚未开通|权限不足/.test(job.error)){const a=document.createElement('a');a.href='https://ark.console.volcengine.com/';a.target='_blank';a.rel='noopener';a.className='btn btn-ghost btn-sm';a.textContent='打开火山方舟控制台';card.append(a);}}
       const actions=document.createElement('div');actions.className='video-job-actions';card.append(actions);
       if(job.status==='failed')actions.append(button(job.remote_id&&!job.remote_failed?'继续查询 / 下载':job.mode==='generate'?'用当前模型重试':'重试',async()=>{await post('jobs/'+job.id+'/retry',job.mode==='generate'?{model:$('jyModel').value}:{});await refresh();}));
@@ -81,7 +108,7 @@
         const form=document.createElement('div');form.className='video-reconcile';const input=document.createElement('input');input.placeholder='控制台中的 cgt- 任务 ID';input.setAttribute('aria-label','火山任务 ID');form.append(input,button('继续查询',async()=>{await post('jobs/'+job.id+'/reconcile',{remote_id:input.value.trim()});await refresh();}));card.append(form);
       }
       if(job.draft_path){
-        const details=document.createElement('details'),summary=document.createElement('summary');summary.textContent='在剪映中打开工程';details.append(summary);const code=document.createElement('code');code.textContent=job.draft_path;details.append(code);const p=document.createElement('p');p.textContent='剪映“文件 → 找回草稿”选择上述文件夹。脚本和备注保存在 production-notes.md；在剪映内调整并导出 MP4。';details.append(p);card.append(details);
+        const details=document.createElement('details');details.dataset.section='draft';details.open=opened.has('draft');const summary=document.createElement('summary');summary.textContent='在剪映中打开工程';details.append(summary);const code=document.createElement('code');code.textContent=job.draft_path;details.append(code);const p=document.createElement('p');p.textContent='剪映“文件 → 找回草稿”选择上述文件夹。脚本和备注保存在 production-notes.md；在剪映内调整并导出 MP4。';details.append(p);card.append(details);
         actions.append(button('复制工程路径',()=>navigator.clipboard.writeText(job.draft_path)));
         const label=document.createElement('label');label.className='btn btn-ghost btn-sm video-final-upload';label.textContent='上传剪映成片';const input=document.createElement('input');input.type='file';input.accept='.mp4';input.className='visually-hidden';input.onchange=async()=>{const file=input.files[0];if(!file)return;if(file.size>100*1024*1024){message('成片最大100MB',true);return;}input.disabled=true;try{await api('jobs/'+job.id+'/final',{method:'POST',body:file});if(outputs.has(job.id)){URL.revokeObjectURL(outputs.get(job.id));outputs.delete(job.id);}await refresh();}catch(e){message(e.message,true);}finally{input.disabled=false;}};label.append(input);actions.append(label);
       }
@@ -89,12 +116,13 @@
         actions.append(button('预览视频',async()=>{if(card.querySelector('video'))return;const video=document.createElement('video');video.controls=true;video.preload='metadata';video.src=await output(job);card.append(video);}));
         actions.append(button('下载 MP4',async()=>{const a=document.createElement('a');a.href=await output(job);a.download=job.title.replace(/[\\/:*?"<>|]/g,'-')+'.mp4';a.click();}));
       }
-      if(!actions.childNodes.length)actions.remove();$('jyJobs').append(card);
+      if(!actions.childNodes.length)actions.remove();cards.push(card);
     }
+    $('jyJobs').replaceChildren(...cards);
   }
-  async function refresh(){if(!token||refreshing)return;refreshing=true;try{const [status,jobs]=await Promise.all([api('status').then(r=>r.json()),api('jobs').then(r=>r.json())]);device=status;connection();renderJobs(jobs);}finally{refreshing=false;}}
+  async function refresh(){if(!token||refreshing)return;refreshing=true;try{const [status,jobs]=await Promise.all([api('status').then(r=>r.json()),api('jobs').then(r=>r.json())]);device=status;connection();renderJobs(jobs);$('jyPollingStatus').textContent='每5秒自动刷新 · 页面最近更新 '+new Date().toLocaleTimeString('zh-CN',{hour12:false});$('jyPollingStatus').style.color='';}finally{refreshing=false;}}
   $('jyModeEdit').onclick=()=>setMode('edit');$('jyModeGenerate').onclick=()=>setMode('generate');$('jyConnect').onclick=connect;$('jyRefresh').onclick=()=>refresh().catch(e=>message(e.message,true));
-  setInterval(()=>{if($('view-video').classList.contains('is-active'))refresh().catch(()=>{});},5000);
+  setInterval(()=>{if($('view-video').classList.contains('is-active'))refresh().catch(()=>{$('jyPollingStatus').textContent='状态刷新失败，请检查本机服务或点击重新连接。';$('jyPollingStatus').style.color='var(--danger)';});},5000);
   window.addEventListener('beforeunload',()=>{for(const url of [...thumbs.values(),...outputs.values()])URL.revokeObjectURL(url);});
   connect();
 })();

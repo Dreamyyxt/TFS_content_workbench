@@ -4,6 +4,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const {pipeline} = require('node:stream/promises');
 const {Transform} = require('node:stream');
+const {buildGenerationPrompt}=require('./volc-video');
 const WEB_ORIGIN = 'https://nail-content-workbench.app.workbuddy.host';
 
 function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs = 120000, volc = null, generationInterval = 5000}) {
@@ -19,13 +20,15 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
     try{
       if(!job.remote_id){
         // Persist before POST: after a restart an uncertain submission must never auto-submit twice.
+        job.submitted_prompt=buildGenerationPrompt(job);job.submitted_at=new Date().toISOString();
         job.status='submitting';job.attempts++;save();
-        job.remote_id=await volc.submit(job,dir);job.status='generating';save();
+        job.remote_id=await volc.submit(job,dir);job.accepted_at=new Date().toISOString();job.status='generating';save();
       }
       const result=await volc.get(job.remote_id);
-      job.remote_status=result.status;job.error='';save();
+      if(job.remote_status!==result.status){job.stage_changed_at=new Date().toISOString();}
+      job.remote_status=result.status;job.last_checked_at=new Date().toISOString();job.query_count=(job.query_count || 0)+1;job.error='';save();
       if(result.status==='succeeded'){
-        job.status='downloading';job.output_url=result.content?.video_url;save();
+        job.status='downloading';job.download_started_at=new Date().toISOString();job.output_url=result.content?.video_url;save();
         await volc.download(job.output_url,path.join(dir,job.id+'.mp4'));
         job.status='finished';job.finished_at=new Date().toISOString();delete job.output_url;save();
       }else if(['failed','expired','cancelled'].includes(result.status)){
@@ -58,7 +61,7 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
     res.writeHead(status, {'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store'});
     res.end(JSON.stringify(data));
   };
-  const safeJob = ({claim, output_url, ...job}) => job;
+  const safeJob = ({claim, output_url, ...job}) => job.mode==='generate' ? {...job,submitted_prompt:job.submitted_prompt || buildGenerationPrompt(job),prompt_recorded:!!job.submitted_prompt} : job;
   const authorize = (req, token) => {
     if (!token) fail(503, '请先启动 Mac 剪映连接器');
     const a = Buffer.from(req.headers.authorization || '');
