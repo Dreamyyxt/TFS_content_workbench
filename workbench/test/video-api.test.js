@@ -1,0 +1,45 @@
+'use strict';
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const http=require('node:http');
+const fs=require('node:fs');
+const os=require('node:os');
+const path=require('node:path');
+const {createVideoAPI}=require('../video-api');
+test('persistent queue, auth, atomic claim, lease fencing and retry',async t=>{
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'fifth-test-'));
+  let api=createVideoAPI({dir,userToken:'user',agentToken:'agent',leaseMs:500});
+  const server=http.createServer((req,res)=>api(req,res,new URL(req.url,'http://localhost')));
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>{server.closeAllConnections();server.close();fs.rmSync(dir,{recursive:true,force:true});});
+  const base='http://127.0.0.1:'+server.address().port+'/api/video/';
+  async function call(route,body,token='user',claim,raw) {
+    return fetch(base+route,{method:body!==undefined || raw?'POST':'GET',headers:{Authorization:'Bearer '+token,...(claim?{'X-Job-Claim':claim}:{})},body:raw || (body!==undefined?JSON.stringify(body):undefined)});
+  }
+  assert.equal((await call('jobs',undefined,'wrong')).status,401);
+  assert.equal((await call('assets?name=bad.html',{},'user',null,Buffer.from('x'))).status,400);
+  const a=await (await call('assets?name=photo.jpg',{},'user',null,Buffer.from('fake-image'))).json();
+  const payload={asset_ids:[a.id],duration:20,request_id:'one',content_id:'material:42',script_id:3};
+  const j=await (await call('jobs',payload)).json();
+  assert.equal((await (await call('jobs',payload)).json()).id,j.id);
+  assert.equal((await call('agent/claim',{device_id:'mac'},'user')).status,401);
+  await call('agent/register',{device_id:'mac',ffmpeg:true},'agent');
+  const claims=await Promise.all([call('agent/claim',{device_id:'mac'},'agent').then(r=>r.json()),call('agent/claim',{device_id:'mac'},'agent').then(r=>r.json())]);
+  assert.equal(claims.filter(Boolean).length,1);
+  const claimed=claims.find(Boolean);
+  assert.equal((await call('agent/jobs/'+j.id+'/complete',{},'agent','wrong',Buffer.from('mp4'))).status,409);
+  await new Promise(r=>setTimeout(r,550));
+  assert.equal((await (await call('jobs')).json())[0].status,'failed');
+  await call('jobs/'+j.id+'/retry',{});
+  const next=await (await call('agent/claim',{device_id:'mac'},'agent')).json();
+  assert.notEqual(next.claim,claimed.claim);
+  assert.equal((await call('agent/jobs/'+j.id+'/complete',{},'agent',claimed.claim,Buffer.from('stale'))).status,409);
+  await call('agent/jobs/'+j.id+'/heartbeat',{timeline:{version:1,clips:[]}},'agent',next.claim);
+  assert.equal((await call('agent/jobs/'+j.id+'/complete',{},'agent',next.claim,Buffer.from('output-mp4'))).status,200);
+  api=createVideoAPI({dir,userToken:'user',agentToken:'agent'});
+  const persisted=await (await call('jobs')).json();
+  assert.equal(persisted[0].status,'review');
+  assert.equal(persisted[0].content_id,'material:42');
+  assert.equal(persisted[0].claim,undefined);
+  assert.equal(await (await call('jobs/'+j.id+'/output')).text(),'output-mp4');
+});

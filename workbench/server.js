@@ -39,6 +39,10 @@ const zlib = require('zlib');
 const { URL } = require('url');
 
 const ROOT = __dirname;
+const videoAPI = require('./video-api').createVideoAPI({
+  dir: process.env.VIDEO_DATA_DIR || path.join(__dirname, '..', '.video-data'),
+  userToken: process.env.VIDEO_USER_TOKEN, agentToken: process.env.VIDEO_AGENT_TOKEN
+});
 const PORT = Number(process.env.PORT || 3000);
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
            '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -814,6 +818,8 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     /* 忽略 */
   }
+
+  if (await videoAPI(req, res, new URL(req.url, 'http://localhost'))) return;
 
   if (pathname === '/api/health') {
     return sendJson(res, 200, { ok: true, service: 'nail-content-workbench', time: new Date().toISOString() });
