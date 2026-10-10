@@ -396,6 +396,13 @@
       </div>
     </div>
 
+    <div class="panel" id="accountSettingsPanel">
+      <div class="panel-head"><div><h2>账号矩阵与生成规则</h2><p class="hint">设置每个账号的定位、时长、计划数量与脚本规则，云端保存后所有设备共用。</p></div><div class="panel-actions"><button class="btn btn-ghost" id="accountAdd" type="button">新增账号</button><button class="btn btn-primary" id="accountSave" type="button">保存账号规则</button></div></div>
+      <p class="hint" id="accountSettingsStatus" role="status">正在读取云端配置…</p>
+      <div id="accountSettingsList"></div>
+      <details id="accountRetired"><summary>已移除账号（可恢复，历史内容保留）</summary><div id="accountRetiredList"></div></details>
+    </div>
+
     <div class="panel">
       <div class="panel-head"><div><h2>内容基调速览</h2><p class="hint">保存后这里显示当前生效的版本，用来核对模型拿到的是不是最新的门店信息</p></div></div>
       <div class="profile-view" id="profileSummary"></div>
@@ -447,7 +454,9 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<script src="./account-strategy.js"></script>
 <script src="./app.js"></script>
+<script src="./account-settings.js"></script>
 <script src="./jianying-studio.js"></script>
 </body>
 </html>

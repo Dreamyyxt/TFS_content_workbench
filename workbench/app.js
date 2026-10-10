@@ -18,16 +18,7 @@ const PUBLIC_CONFIG = {
 /* ---------------------------------------------------------------------
    2. 业务常量
    --------------------------------------------------------------------- */
-const ACCOUNTS = [
-  { key:'douyin_off', name:'抖音官方号',   platform:'抖音',   perWeek:5, goal:'团购核销',
-    desc:'效果 + 团购：款式效果 50% / 团购 30% / 门店信任 20%' },
-  { key:'xhs_off',    name:'小红书官方号', platform:'小红书', perWeek:3, goal:'收藏 + 私信',
-    desc:'搜索词占位：款式适配 40% / 价格避坑 40% / 到店信息 20%' },
-  { key:'boss',       name:'老板IP号',     platform:'双平台', perWeek:3, goal:'信任 + 涨粉',
-    desc:'讲真话的匠人老板：人设故事 40% / 行业观点 30% / 专业干货 30%' },
-  { key:'daily',      name:'店铺日常号',   platform:'小红书', perWeek:3, goal:'完播 + 黏性',
-    desc:'温度感：琐碎日常 60% / 搞笑日常 40%' }
-];
+const ACCOUNTS = AccountStrategy.accounts;
 const ACC_BY_NAME = Object.fromEntries(ACCOUNTS.map(a => [a.name, a]));
 const ACC_BY_KEY  = Object.fromEntries(ACCOUNTS.map(a => [a.key, a]));
 
@@ -506,6 +497,7 @@ const S = {
   trend: null,
   trendAll: [],
   profile: null,
+  accountConfigRecord:null,accountSettingsLoaded:false,
   filter: '全部',
   dataFilter: '全部',
   onlyLatest: true,
@@ -569,7 +561,11 @@ async function dbLoadProfile(){
     .select('*').order('updated_at', { ascending: false }).limit(20);
   if (error) throw error;
   const rows = data || [];
-  S.profile = rows.find(r => r.profile_key === 'main') || rows[0] || null;
+  S.profile = rows.find(r => r.profile_key === 'main') || rows.find(r=>r.profile_key!=='account_matrix') || null;
+  S.accountConfigRecord=rows.find(r=>r.profile_key==='account_matrix') || null;
+  if(S.accountConfigRecord){const saved=JSON.parse(S.accountConfigRecord.note);if(saved.version!==1)throw Error('账号配置版本不支持');AccountStrategy.configure(saved.accounts);}
+  syncAccountMaps();S.accountSettingsLoaded=true;
+  window.dispatchEvent(new Event('account-settings-loaded'));
 }
 
 async function dbSaveProfile(patch){
@@ -587,6 +583,31 @@ async function dbSaveProfile(patch){
   }
   return S.profile;
 }
+
+function syncAccountMaps(){
+  for(const key of Object.keys(ACC_BY_NAME))delete ACC_BY_NAME[key];
+  for(const key of Object.keys(ACC_BY_KEY))delete ACC_BY_KEY[key];
+  AccountStrategy.getConfig().forEach(a=>{ACC_BY_NAME[a.name]=a;ACC_BY_KEY[a.key]=a;});
+}
+async function saveAccountSettings(config){
+  if(!S.accountSettingsLoaded)throw Error('云端账号配置未加载完成，请刷新后再保存');
+  if(S.busy || S.genRunning)throw Error('正在生成内容，请等待完成后再修改账号规则');
+  const accounts=AccountStrategy.validate(config);
+  const existing=S.accountConfigRecord;
+  const {data:latest,error:readError}=await cloud.database.from('store_profile').select('*').eq('profile_key','account_matrix');
+  if(readError)throw readError;
+  const remote=(latest || [])[0];
+  if((remote?.updated_at || '')!==(existing?.updated_at || ''))throw Error('账号配置已被其他设备修改，请刷新后再编辑');
+  const patch={profile_key:'account_matrix',shop_name:'账号矩阵设置',note:JSON.stringify({version:1,accounts}),updated_at:new Date().toISOString(),updated_by:opsName()};
+  const query=existing?cloud.database.from('store_profile').update(patch).eq('id',existing.id):cloud.database.from('store_profile').insert(patch);
+  const {data,error}=await query.select();if(error)throw error;
+  S.accountConfigRecord=(data || [])[0] || {...existing,...patch};
+  AccountStrategy.configure(accounts);syncAccountMaps();S.filter='全部';S.dataFilter='全部';
+  fillMetricControls();fillDataFilter();renderAll();
+  window.dispatchEvent(new Event('account-settings-loaded'));
+  toast('账号矩阵已同步云端，新计划和新脚本将使用新规则','ok');
+}
+window.WorkbenchAccounts={getConfig:()=>AccountStrategy.getConfig(),save:saveAccountSettings,loaded:()=>S.accountSettingsLoaded};
 
 /* 当前生效的档案（云端为空时用内置默认值兜底） */
 function profile(){
@@ -793,7 +814,7 @@ async function importWebMaterials(t){
   const list = webMaterialsOf(t);
   if (!list.length) return 0;
   if (S.materials.some(m => m.batch_id === t.batch_id)) return 0;
-  const rows = list.filter(m => m.account && ACC_BY_NAME[m.account]).map(m => ({
+  const rows = list.filter(m => m.account && ACCOUNTS.some(a=>a.name===m.account)).map(m => ({
     batch_id: t.batch_id,
     account: m.account,
     platform: m.platform || (ACC_BY_NAME[m.account] || {}).platform || '',
@@ -864,6 +885,7 @@ function corpusPrompt(c){
   L.push('如果材料里一周内的新内容很少，就如实说明「本周公开可得的新内容有限」，绝不许拿去年同期或更早的内容冒充当下潮流。');
   L.push('');
   L.push(profileBlock());
+  L.push(AccountStrategy.planRules());
   L.push('严格只输出一个 JSON 对象，不要任何解释文字、不要 markdown 代码块。结构：');
   L.push('{');
   L.push('  "summary": "不超过 140 字，当前美甲美睫在抖音与小红书的流量风向结论，要区分两个平台打法",');
@@ -876,12 +898,12 @@ function corpusPrompt(c){
   L.push('  ],');
   L.push('  "materials": [');
   L.push('    {');
-  L.push('      "account": "必须是以下之一：抖音官方号 / 小红书官方号 / 老板IP号 / 店铺日常号",');
+  L.push('      "account": "必须是以下之一：' + ACCOUNTS.map(a=>a.name).join(' / ') + '",');
   L.push('      "platform": "抖音 / 小红书 / 双平台",');
   L.push('      "title": "选题标题。抖音官方号标题要埋地域词吃同城搜索；小红书官方号标题必须是用户会原样搜索的那句话",');
   L.push('      "angle": "切入角度，一句话",');
-  L.push('      "content_form": "口播 / 剧情 / 教程 / 对比 / 图文 / vlog / 清单",');
-  L.push('      "goal": "转化 / 涨粉 / 信任 / 收藏 / 完播",');
+  L.push('      "content_form": "作品展示 / 专业讲解 / 口播 / 日常 / 剧情 / 教程 / 对比 / 图文 / vlog / 清单",');
+  L.push('      "goal": "' + ACCOUNTS.map(a=>a.goal).join(' / ') + '",');
   L.push('      "hook": "黄金 3 秒钩子原句",');
   L.push('      "keywords": ["2-4 个该条素材对应的搜索词"],');
   L.push('      "trend_reason": "骑的是上面哪个热点，一句话",');
@@ -892,9 +914,9 @@ function corpusPrompt(c){
   L.push('');
   L.push('sections 要求：第一个 key 必须是 douyin（抖音热点），第二个必须是 xhs（小红书热点）；每个分组 3-5 条；');
   L.push('  每条 point 的 src 写来源编号数组，必须与上面材料里的编号对应，不能引用不存在的编号。');
-  L.push('数量要求：抖音官方号 6 条、小红书官方号 5 条、老板IP号 4 条、店铺日常号 4 条，合计 19 条。');
-  L.push('热点使用要求：每条素材都要明确骑上一个上面抓到的热点（款式动向、价格与信任话题、营销节点），并在 trend_reason 里写清骑的是哪个。');
-  L.push('门店贴合要求：标题与 trend_reason 必须用上门店档案里的真实信息（位置 / 交通 / 价格定位 / 品牌格调 / 主打款式 / 差异化卖点）。');
+  L.push(AccountStrategy.planCounts());
+  L.push('热点使用要求：优先选择与账号定位匹配的真实热点，并在 trend_reason 说明关联；不匹配时围绕该账号常青内容选题，明确标为常青内容，不编造热点，不强行把作品号、老板号、日常号都写成探店。');
+  L.push('门店贴合要求：选题须符合门店档案里的真实信息（位置 / 交通 / 价格定位 / 品牌格调 / 主打款式 / 差异化卖点）。');
   L.push('硬性约束：禁止极限词（最/第一/永久/百分百之类）；禁止医疗功效表述（消毒、杀菌、修复受损甲等）；禁止导流（微信、手机号、站外平台）；禁止虚假宣传与贬低同行；不得编造门店价格。');
   return L.join('\n');
 }
@@ -1160,9 +1182,10 @@ function refreshPrompt(){
   const dateStr = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
   const g = trendGrounding();
   return [
-    '今天是 ' + dateStr + '。请基于下面两份材料，为「第五季美甲美睫」出一批本周可拍的内容选题（4 个账号各自的选题方向见下方数量要求）。',
+    '今天是 ' + dateStr + '。请基于下面两份材料，为「第五季美甲美睫」出一批本周可拍的内容选题（各启用账号的选题方向与数量见下方规则）。',
     '',
     profileBlock(),
+    AccountStrategy.planRules(),
     g,
     '严格只输出一个 JSON 对象，不要任何解释文字、不要 markdown 代码块。结构：',
     '{',
@@ -1170,12 +1193,12 @@ function refreshPrompt(){
     '  "keywords": ["12-16 个当下高价值搜索词/流量词，必须包含地域词（如 静安区美甲、静安寺美甲、上海美甲）"],',
     '  "materials": [',
     '    {',
-    '      "account": "必须是以下之一：抖音官方号 / 小红书官方号 / 老板IP号 / 店铺日常号",',
+    '      "account": "必须是以下之一：' + ACCOUNTS.map(a=>a.name).join(' / ') + '",',
     '      "platform": "抖音 / 小红书 / 双平台",',
     '      "title": "选题标题。抖音官方号的标题要埋地域词吃同城搜索；小红书官方号的标题必须是用户会原样搜索的那句话",',
     '      "angle": "切入角度，一句话",',
-    '      "content_form": "口播 / 剧情 / 教程 / 对比 / 图文 / vlog / 清单",',
-    '      "goal": "转化 / 涨粉 / 信任 / 收藏 / 完播",',
+    '      "content_form": "作品展示 / 专业讲解 / 口播 / 日常 / 剧情 / 教程 / 对比 / 图文 / vlog / 清单",',
+    '      "goal": "' + ACCOUNTS.map(a=>a.goal).join(' / ') + '",',
     '      "hook": "黄金 3 秒钩子原句",',
     '      "keywords": ["2-4 个该条素材对应的搜索词"],',
     '      "trend_reason": "为什么这条素材现在有风口，一句话",',
@@ -1184,10 +1207,10 @@ function refreshPrompt(){
     '  ]',
     '}',
     '',
-    '数量要求：抖音官方号 6 条、小红书官方号 5 条、老板IP号 4 条、店铺日常号 4 条，合计 19 条。',
-    '热点使用要求：每条素材都要明确骑上一个上面抓到的小红书或抖音热点（款式动向、价格与信任话题、营销节点），' +
-      '并在 trend_reason 里写清是骑的哪个热点；不准出现上面没有的行业数据。',
-    '门店贴合要求：标题与 trend_reason 必须用上门店档案里的真实信息（位置 / 交通 / 价格定位 / 品牌格调 / 主打款式 / 差异化卖点），' +
+    AccountStrategy.planCounts(),
+    '热点使用要求：优先匹配账号定位与真实热点；不匹配时允许常青选题并如实注明，' +
+      '在 trend_reason 说明热点关联或常青理由；不准编造热点或行业数据。',
+    '门店贴合要求：选题须符合门店档案里的真实信息（位置 / 交通 / 价格定位 / 品牌格调 / 主打款式 / 差异化卖点），' +
       '抖音号标题要埋地域词，小红书号标题要是用户会原样搜索的那句话。',
     '内容要求：贴合当下季节与近期营销节点（节后卸甲养护、万圣节预热等），款式方向以门店主推款式为准。',
     '硬性约束：禁止极限词（最/第一/永久/百分百之类）；禁止医疗功效表述（消毒、杀菌、修复受损甲等）；禁止导流（微信、手机号、站外平台）；禁止虚假宣传与贬低同行；不得编造门店价格。'
@@ -1235,7 +1258,7 @@ async function aiRefreshTrend(){
 
     const batch = 'B' + ts();
     const rows = json.materials
-      .filter(m => ACC_BY_NAME[m.account])
+      .filter(m => ACCOUNTS.some(a=>a.name===m.account))
       .map(m => ({
         batch_id: batch,
         account: m.account,
@@ -1503,7 +1526,9 @@ function scriptPrompt(m){
   return [
     '请为下面这条素材写一支可直接开拍的短视频分镜脚本。',
     '',
-    '素材信息：',
+    AccountStrategy.scriptRules(m.account),
+    '',
+    '素材信息（如与上述账号定位冲突，以账号规则为准）：',
     '- 账号：' + m.account + '（平台：' + (m.platform || '') + '）',
     '- 选题：' + m.title,
     '- 切入角度：' + (m.angle || '—'),
@@ -1518,7 +1543,7 @@ function scriptPrompt(m){
     '## 黄金 3 秒钩子（原句，可直接念）',
     '## 分镜表',
     '用表格：| 时间 | 画面 / 运镜 | 口播 | 字幕 / 贴纸 |',
-    '共 6-9 个镜头，时间轴连续，总时长 40-55 秒。',
+    '镜头数、时间轴和总时长严格遵循上面的账号专属分镜要求，不使用统一时长。',
     '## 发布配置',
     '- 发布标题（抖音号要埋地域词；小红书号要用用户会原样搜索的话）',
     '- 话题标签（3-5 个精准词，不要堆砌）',
@@ -1590,7 +1615,7 @@ async function generateScript(materialId, quiet){
       account: m.account,
       platform: m.platform || '',
       title: m.title,
-      duration: '40-55s',
+      duration: AccountStrategy.get(m.account).duration,
       content: text,
       compliance: scan.level,
       risk_hits: riskText,
@@ -1729,7 +1754,7 @@ function autoSchedule(){
   const firstShoot = shootDays[0];
   ACCOUNTS.forEach(acc => {
     const list = items.filter(m => m.account === acc.name);
-    const pattern = WEEK_PATTERN[acc.name] || [1, 3, 5];
+    const pattern = Array.from({length:acc.perWeek},(_,i)=>Math.floor(i*7/acc.perWeek));
     const slots = PLATFORM_SLOTS[acc.platform] || PLATFORM_SLOTS['小红书'];
     list.forEach((m, i) => {
       const week = Math.floor(i / pattern.length);
@@ -1993,7 +2018,7 @@ function renderProgress(){
         (planned ? ' <span style="color:var(--muted)">（已排 ' + planned + '）</span>' : '') + '</div>' +
       '</div>';
   }).join('') +
-  '<p class="hint" style="margin-top:4px">目标＝账号矩阵的周更配比（抖音官方号 5 · 小红书官方号 3 · 老板IP号 3 · 店铺日常号 3）。' +
+  '<p class="hint" style="margin-top:4px">目标＝店铺设置中的周更配比（' + ACCOUNTS.map(a=>a.name+' '+a.perWeek).join(' · ') + '）。' +
   '「已排」是本周排期里的条数，可用来预判这周能不能打满。</p>';
 
   /* ---- 拍摄日负载 ---- */
