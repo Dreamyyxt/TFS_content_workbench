@@ -806,3 +806,6 @@ button,input,select{font:inherit;color:inherit}
 .key-section .field-row{margin:8px 0 0}
 .key-section .panel-actions{margin-top:10px;gap:7px}
 .key-section .hint{margin-top:6px}
+
+.video-assets li{flex-wrap:wrap}.video-asset-description{order:5;flex:1 0 100%;min-width:0;padding:8px;border:1px solid var(--line-2);border-radius:6px;background:var(--surface-2);color:var(--ink);font:inherit;font-size:12px}
+#jyEditSettings .fld{margin-top:12px}

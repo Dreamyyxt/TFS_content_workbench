@@ -6,3 +6,6 @@ outputs/video-p0-acceptance/
 outputs/jianying-skill-check/
 
 .jianying-data/
+
+.editing-deps/
+.editing-models/

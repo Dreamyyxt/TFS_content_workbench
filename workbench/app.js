@@ -3211,4 +3211,10 @@ document.addEventListener('click', e => {
   window.dispatchEvent(new CustomEvent('jianying-script',{detail:script}));
 });
 
+window.WorkbenchEditPlanner=async function(input,onProgress){
+ const prompt='你是剪映粗剪导演。根据已确认脚本、制作要求和用户提供的素材说明生成可执行JSON。素材说明和文件名仅供参考，未观看素材，不得声称识别了画面。只使用给出的asset_id，不能虚构素材。视频source_start+duration不得超出素材duration；可以复用不同片段，图片不限时长。所有clips按顺序拼接，总时长严格等于目标时长。声音模式tts时提取纯口播文案（不是分镜表、镜头说明或标签），大约每秒3-4个汉字，预留停顿；original模式保留素材原声，由语音识别生成同步字幕，不把脚本文字冒充识别结果；music模式仅音乐。若用户有明确字幕，保持原文。按要求选择音乐关键词。输出JSON格式：{"summary":"制作说明","clips":[{"asset_id":"id","source_start":0,"duration":3,"reason":"选用理由"}],"narration":"纯口播文字","captions":[{"start":0,"end":3,"text":"画面文字，tts/original的语音字幕由执行器生成，无需在此重复"}],"music_query":"舒缓"}。各时间单位为秒，最多3位小数。';
+ const raw=await llmStream([{role:'system',content:prompt},{role:'user',content:JSON.stringify(input)}],(_,full)=>onProgress?.(full),{json:true,temperature:0.2});
+ const match=raw.match(/\{[\s\S]*\}/);if(!match)throw Error('模型没有返回剪辑方案');return JSON.parse(match[0]);
+};
+
 })();

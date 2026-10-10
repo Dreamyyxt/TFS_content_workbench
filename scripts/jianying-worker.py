@@ -8,6 +8,7 @@ import threading
 import time
 import urllib.request
 from datetime import datetime
+from jianying_edit import make_edit
 from jianying_timing import media_durations, partition, validate_tracks, fill_scale
 
 sys.dont_write_bytecode = True
@@ -33,9 +34,11 @@ def call(route, body, claim=None):
 def build(job):
     assets = job['assets']
     target = job['duration']
-    durations = media_durations(target, assets, get_duration_ffprobe_cached)
+    durations = media_durations(target, assets, get_duration_ffprobe_cached) if not job.get('edit_plan') else []
     name = '第五季-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+job['id'][:8]+'-'+job['claim'][:8]
     project = JyProject(name, width=1080, height=1920, drafts_root=str(drafts), overwrite=False)
+    if job.get('edit_plan'):
+        return make_edit(project,job,skill,get_duration_ffprobe_cached,lambda stage:call('worker/jobs/'+job['id']+'/heartbeat',{'stage':stage},job['claim']))
     cursor = 0
     clips = []
     for asset,duration in zip(assets,durations):

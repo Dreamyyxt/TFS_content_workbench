@@ -218,6 +218,17 @@ node start-jianying.cjs</code></pre>
           <label class="fld"><span>视频标题</span><input id="jyTitle" required maxlength="150" value="美甲作品"></label>
           <label class="fld"><span>拍摄脚本 <span id="jyScriptRequired">（可选）</span></span><textarea id="jyScript" rows="10" maxlength="30000" placeholder="粘贴已确认的分镜、画面描述和文案…"></textarea></label>
           <label class="fld"><span id="jyNotesLabel">剪辑备注（随工程保存）</span><textarea id="jyNotes" rows="2" maxlength="4000" placeholder="补充镜头、节奏或风格要求"></textarea></label>
+          <div id="jyEditSettings">
+            <label class="fld"><span>声音方式</span><select id="jyVoiceMode"><option value="tts">按文案生成 AI 口播 + 同步字幕</option><option value="original">保留视频原声 + 识别口播字幕</option><option value="music">仅音乐 + 画面字幕</option></select></label>
+            <label class="fld"><span>口播文案（可选，留空从脚本提取）</span><textarea id="jyNarration" rows="3" maxlength="2000" placeholder="只填写要说出来的话，不填镜头说明"></textarea></label>
+            <label class="fld"><span>配音声音</span><select id="jySpeaker"><option value="zh_female_xiaopengyou">女声</option><option value="zh_male_huoli">男声</option></select></label>
+            <label class="fld"><span>背景音乐</span><select id="jyMusicMode"><option value="auto">按剪辑要求选音乐</option><option value="upload">使用上传音乐</option><option value="none">不添加</option></select></label>
+            <label class="fld"><span>上传配乐（MP3 / WAV / M4A，可选）</span><input id="jyMusicFile" type="file" accept=".mp3,.wav,.m4a"></label>
+            <p id="jyMusicName" class="hint">自动配乐会检索 Skill 音乐库；无法取得音乐会明确报错。</p>
+            <label class="fld"><span>配乐音量（0–1，口播时可降低）</span><input id="jyMusicVolume" type="number" min="0" max="1" step="0.05" value="0.6"></label>
+            <p class="hint">AI 会依据脚本、剪辑要求及每个素材的说明安排镜头。任务中可查看剪辑方案；原声识别首次需加载本地模型。</p>
+            <details><summary>本次剪辑方案</summary><pre id="jyEditPlanPreview" class="video-prompt">提交剪辑时生成。</pre></details>
+          </div>
           <details class="video-advanced"><summary>字幕与更多设置</summary>
             <label class="fld"><span id="jyCaptionsLabel">画面字幕（每行一句，按时长平均分配）</span><textarea id="jyCaptions" rows="3" maxlength="2000"></textarea></label>
             <div id="jyGenAdvanced" hidden>
@@ -536,6 +547,7 @@ node start-jianying.cjs</code></pre>
 <script src="./account-strategy.js"></script>
 <script src="./app.js"></script>
 <script src="./account-settings.js"></script>
+<script src="./edit-plan.js"></script>
 <script src="./jianying-studio.js"></script>
 </body>
 </html>

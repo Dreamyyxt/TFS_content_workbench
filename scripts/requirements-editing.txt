@@ -1,0 +1,4 @@
+edge-tts==7.2.8
+faster-whisper==1.2.1
+websockets==13.1
+av==16.1.0

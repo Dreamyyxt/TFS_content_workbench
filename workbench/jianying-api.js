@@ -5,6 +5,8 @@ const crypto = require('node:crypto');
 const {pipeline} = require('node:stream/promises');
 const {Transform} = require('node:stream');
 const {buildGenerationPrompt}=require('./volc-video');
+const {validate:validateEditPlan}=require('./edit-plan');
+const execFile=require('node:util').promisify(require('node:child_process').execFile);
 const WEB_ORIGIN = 'https://nail-content-workbench.app.workbuddy.host';
 
 function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs = 120000, volc = null, generationInterval = 5000}) {
@@ -129,10 +131,14 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
       if (route === 'assets' && req.method === 'POST') {
         const name=String(url.searchParams.get('name') || '').slice(0,200);
         const ext=path.extname(name).toLowerCase();
-        if (!['.jpg','.jpeg','.png','.webp','.mp4','.mov','.m4v'].includes(ext)) fail(400,'请上传照片或视频');
-        const asset={id:crypto.randomUUID(), name, ext, type:['.mp4','.mov','.m4v'].includes(ext)?'video':'image'};
+        if (!['.jpg','.jpeg','.png','.webp','.mp4','.mov','.m4v','.mp3','.wav','.m4a'].includes(ext)) fail(400,'请上传照片或视频');
+        const asset={id:crypto.randomUUID(), name, ext, type:['.mp4','.mov','.m4v'].includes(ext)?'video':['.mp3','.wav','.m4a'].includes(ext)?'audio':'image'};
         asset.size=await upload(req,path.join(dir,asset.id+ext));
         state.assets.push(asset);save();send(res,201,asset);return true;
+      }
+      if(route==='assets/inspect'&&req.method==='POST'){
+        const b=await json(req);if(!Array.isArray(b.asset_ids)||b.asset_ids.length>30)fail(400,'素材列表无效');const result=[];
+        for(const id of b.asset_ids){const a=state.assets.find(a=>a.id===id);if(!a||a.type==='audio')fail(400,'请使用照片或视频素材');let info={};if(a.type==='video'){try{const {stdout}=await execFile(process.env.JY_FFPROBE||'ffprobe',['-v','error','-show_entries','format=duration:stream=width,height,codec_type','-of','json',path.join(dir,a.id+a.ext)],{timeout:15000,maxBuffer:1024*1024});const p=JSON.parse(stdout);info={duration:Number(p.format?.duration),has_audio:p.streams.some(s=>s.codec_type==='audio'),width:p.streams.find(s=>s.codec_type==='video')?.width,height:p.streams.find(s=>s.codec_type==='video')?.height};if(!Number.isFinite(info.duration)||info.duration<=0)throw Error();}catch{fail(400,'无法读取视频：'+a.name);}}result.push({id:a.id,name:a.name,type:a.type,...info});}send(res,200,result);return true;
       }
       if (route === 'jobs' && req.method === 'GET') {send(res,200,state.jobs.map(safeJob));return true;}
       if (route === 'jobs' && req.method === 'POST') {
@@ -151,7 +157,9 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
           if(!Array.isArray(b.reference_videos || []) || (b.reference_videos || []).length>3 || (b.reference_videos || []).some(u=>{try{return new URL(u).protocol!=='https:';}catch{return true;}}))fail(400,'参考视频需为 HTTPS 公网链接，最多3段');
           if(!/^(doubao-seedance-2-[\w-]+|ep-[\w-]+)$/.test(String(b.model || '')))fail(400,'请选择可用的火山视频模型');
         }
-        const job={mode,model:mode==='generate'?b.model:undefined,reference_videos:mode==='generate'?(b.reference_videos || []):[],id:crypto.randomUUID(), request_id:b.request_id, title:String(b.title || '第五季作品').slice(0,150),
+        let editFields={};
+        if(mode==='edit'&&b.edit_options){const o=b.edit_options;if(!['tts','original','music'].includes(o.voice)||!['auto','upload','none'].includes(o.music)||!['zh_female_xiaopengyou','zh_male_huoli'].includes(o.speaker)||!Number.isFinite(o.music_volume)||o.music_volume<0||o.music_volume>1)fail(400,'剪辑声音设置无效');if(b.asset_ids.some(id=>state.assets.find(a=>a.id===id).type==='audio'))fail(400,'实拍素材不接受音频');const music=state.assets.find(a=>a.id===o.music_asset_id);if(o.music==='upload'&&music?.type!=='audio')fail(400,'上传配乐无效');let plan;try{plan=validateEditPlan({...b.edit_plan,clips:b.edit_plan.clips.map(c=>({...c,duration:c.duration_us/1e6,source_start:c.source_start_us/1e6})),captions:b.edit_plan.captions.map(c=>({...c,start:c.start_us/1e6,end:(c.start_us+c.duration_us)/1e6}))},b.asset_ids.map(id=>state.assets.find(a=>a.id===id)),b.duration);}catch(e){fail(400,'剪辑方案无效：'+e.message);}if(o.voice==='tts'&&!plan.narration)fail(400,'AI配音需要口播文案');editFields={edit_plan:plan,edit_options:o,music_asset:o.music==='upload'?music:null};}
+        const job={...editFields,mode,model:mode==='generate'?b.model:undefined,reference_videos:mode==='generate'?(b.reference_videos || []):[],id:crypto.randomUUID(), request_id:b.request_id, title:String(b.title || '第五季作品').slice(0,150),
           content_id:String(b.content_id || crypto.randomUUID()).slice(0,100),script_id:b.script_id || null,
           account:String(b.account || '').slice(0,100),script:String(b.script || '').slice(0,30000),
           instructions:String(b.instructions || '').slice(0,4000),captions:String(b.captions || '').slice(0,2000),
@@ -213,7 +221,7 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
         const active=state.jobs.some(j=>j.status==='building');
         const job=state.device.ready && !active ? state.jobs.find(j=>j.status==='queued' && j.mode!=='generate') : null;
         if (job) Object.assign(job,{status:'building',claim:crypto.randomUUID(),lease_until:Date.now()+leaseMs,attempts:job.attempts+1});
-        save();send(res,200,job ? {...job,assets:job.assets.map(a=>({...a,path:path.join(dir,a.id+a.ext)}))} : null);return true;
+        save();send(res,200,job ? {...job,assets:job.assets.map(a=>({...a,path:path.join(dir,a.id+a.ext)})),music_asset:job.music_asset?{...job.music_asset,path:path.join(dir,job.music_asset.id+job.music_asset.ext)}:null} : null);return true;
       }
       const update=route.match(/^worker\/jobs\/([\w-]+)\/(heartbeat|complete|fail)$/);
       if (update && req.method==='POST') {
@@ -222,11 +230,11 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
         const b=await json(req);
         if (job.status!=='building' || req.headers['x-job-claim']!==job.claim || job.lease_until < Date.now()) fail(409,'任务领取凭据已失效');
         if (state.device) state.device.last_seen=Date.now();
-        if (update[2]==='heartbeat') job.lease_until=Date.now()+leaseMs;
+        if (update[2]==='heartbeat'){job.lease_until=Date.now()+leaseMs;if(b.stage){job.edit_stage=String(b.stage).slice(0,200);job.updated_at=new Date().toISOString();}}
         if (update[2]==='fail') {job.status='failed';job.error=String(b.error || '剪映工程生成失败').slice(0,1000);}
         if (update[2]==='complete') {
-          if (typeof b.draft_path!=='string' || !b.draft_path || !Array.isArray(b.clips) || b.clips.length!==job.assets.length) fail(400,'工程回报不完整');
-          Object.assign(job,{status:'draft_ready',draft_path:b.draft_path,draft_name:String(b.draft_name || ''),clips:b.clips,skill_version:String(b.skill_version || ''),opened_in_jianying:false});
+          if (typeof b.draft_path!=='string' || !b.draft_path || !Array.isArray(b.clips) || b.clips.length!==(job.edit_plan?.clips.length||job.assets.length)) fail(400,'工程回报不完整');
+          Object.assign(job,{status:'draft_ready',draft_path:b.draft_path,draft_name:String(b.draft_name || ''),clips:b.clips,skill_version:String(b.skill_version || ''),opened_in_jianying:false,edit_stage:'粗剪工程已生成（待剪映预览验收）',edit_report:b.edit_report||null});
         }
         save();send(res,200,{ok:true});return true;
       }

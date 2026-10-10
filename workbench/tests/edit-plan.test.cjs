@@ -1,0 +1,4 @@
+const test=require('node:test'),assert=require('node:assert/strict');const {validate}=require('../edit-plan');
+const assets=[{id:'a',type:'video'},{id:'b',type:'image'}];
+test('edit plan preserves trims and repeated shots with exact integer boundaries',()=>{const p=validate({clips:[{asset_id:'a',source_start:2,duration:6.667},{asset_id:'b',duration:6.666},{asset_id:'a',duration:6.667}],narration:'口播'},assets,20);assert.equal(p.clips[0].source_start_us,2e6);assert.equal(p.clips[2].start_us+p.clips[2].duration_us,20e6);});
+test('invalid references, durations and captions cannot reach Skill',()=>{for(const p of [{clips:[{asset_id:'x',duration:20}]},{clips:[{asset_id:'a',duration:-20}]},{clips:[{asset_id:'a',duration:10}]},{clips:[{asset_id:'a',duration:20}],captions:[{start:19,end:22,text:'字幕'}]}])assert.throws(()=>validate(p,assets,20));});
