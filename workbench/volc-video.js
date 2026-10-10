@@ -6,8 +6,18 @@ const DEFAULT_MODEL='doubao-seedance-2-0-260128';
 function buildGenerationPrompt(job){
   return '根据以下已确认的拍摄脚本创作竖屏视频。遵循镜头顺序、主体和画面要求。\n标题：'+job.title+'\n拍摄脚本：\n'+job.script+'\n补充要求：\n'+job.instructions+(job.captions?'\n画面文字要求：\n'+job.captions:'');
 }
-function createVolcClient({keyFile=path.join(os.homedir(),'.workbuddy/volc_mediakit.key'),fetchImpl=fetch}={}) {
-  const key=()=>{const value=(process.env.ARK_API_KEY || (fs.existsSync(keyFile)?fs.readFileSync(keyFile,'utf8'):'')).trim();if(!value)throw Error('未配置火山方舟密钥，请检查 ~/.workbuddy/volc_mediakit.key');return value;};
+function createVolcClient({keyFile=path.join(os.homedir(),'.workbuddy/volc_mediakit.key'),fetchImpl=fetch,runtimeKey=''}={}) {
+  /* 密钥来源优先级：页面粘贴（runtimeKey，不落盘）> 环境变量 ARK_API_KEY > 本机 key 文件。
+     页面来源是为「换电脑不必再手动放 key 文件」而加：在页面「密钥」里粘贴一次，
+     存进当前浏览器，之后每个请求随 X-Ark-Key 头带过来，服务端只用于本次调用。 */
+  let override=String(runtimeKey || '').trim();
+  const keyFileHas=()=>fs.existsSync(keyFile) && String(fs.readFileSync(keyFile,'utf8')).trim()!=='';
+  const keySource=()=>override ? 'page' : (String(process.env.ARK_API_KEY || '').trim() ? 'env' : (keyFileHas() ? 'file' : 'none'));
+  const key=()=>{
+    const value=(override || process.env.ARK_API_KEY || (fs.existsSync(keyFile)?fs.readFileSync(keyFile,'utf8'):'')).trim();
+    if(!value)throw Error('未配置火山方舟密钥：请在页面「🔑 密钥」中粘贴火山方舟 API Key，或配置 ~/.workbuddy/volc_mediakit.key');
+    return value;
+  };
   async function request(route,body) {
     const secret=key();let response;
     try{response=await fetchImpl(BASE+route,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+secret,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(60000)});}
@@ -17,14 +27,18 @@ function createVolcClient({keyFile=path.join(os.homedir(),'.workbuddy/volc_media
       const code=String(data.error?.code || response.status);
       let detail=String(data.error?.message || '请求失败').replaceAll(secret,'[已隐藏]').replace(/ark-[\w-]+/g,'[已隐藏]');
       if(/has not activated|model.*not.*enabled/i.test(detail))detail='尚未开通所选火山视频模型，请在方舟控制台开通后重试，或选择已开通的模型。';
-      if(response.status===401)detail='火山方舟密钥无效，请更新 ~/.workbuddy/volc_mediakit.key 后重试。';
+      if(response.status===401)detail='火山方舟密钥无效，请在页面「🔑 密钥」中更新后重试。';
       if(response.status===403)detail='火山模型未开通、余额或权限不足，请在方舟控制台检查：'+code;
       throw Object.assign(Error(detail.slice(0,500)),{transient:response.status===429 || response.status>=500,uncertain:!!body && response.status>=500});
     }
     return data;
   }
   return {
-    async capabilities(){try{const data=await request('/models');return {ready:true,model:DEFAULT_MODEL,models:(data.data || []).filter(m=>/seedance-2-/.test(m.id)).map(m=>m.id)};}catch(e){return {ready:false,error:e.message,model:DEFAULT_MODEL};}},
+    /* 页面粘贴的密钥（每次带 X-Ark-Key 头进来时更新）；传空串则回退到环境变量 / key 文件 */
+    setKey(value){ override=String(value==null?'':value).trim(); },
+    hasKey(){ try{ key(); return true; }catch{ return false; } },
+    keySource,
+    async capabilities(){try{const data=await request('/models');return {ready:true,model:DEFAULT_MODEL,source:keySource(),models:(data.data || []).filter(m=>/seedance-2-/.test(m.id)).map(m=>m.id)};}catch(e){return {ready:false,error:e.message,model:DEFAULT_MODEL,source:keySource()};}},
     async submit(job,dir){
       const prompt=job.submitted_prompt || buildGenerationPrompt(job);
       const content=[{type:'text',text:prompt}];

@@ -101,8 +101,8 @@
           <button class="btn btn-ghost btn-sm" id="btnTrendFold">收起</button>
           <button class="btn btn-ghost" id="btnSeed">载入趋势底稿</button>
           <button class="btn btn-ghost" id="btnAiTrend">生成新的视频计划</button>
-          <button class="btn btn-ghost" id="btnSecure" title="粘贴红狐密钥（只存在本机浏览器），实时采集风向会自动带上抖音 + 小红书站内爆款数据">
-            <span class="ico">🔑</span> 数据源
+          <button class="btn btn-ghost" id="btnSecure" title="密钥管理：① 红狐（数据源）② 火山方舟（视频制作 · 生成）。密钥只存在这台设备的浏览器里">
+            <span class="ico">🔑</span> 密钥
           </button>
           <button class="btn btn-primary" id="btnRefresh">
             <span class="ico">🛰</span> 实时采集风向
@@ -185,7 +185,10 @@
     <div class="panel video-heading">
       <div class="panel-head">
         <div><h2>视频制作 <span class="h2-sub">· 从脚本到视频</span></h2><p class="hint">上传实拍素材剪辑，或让 AI 根据拍摄脚本生成视频。</p></div>
-        <button class="btn btn-ghost btn-sm" id="jyConnect">连接制作服务</button>
+        <div class="panel-actions">
+          <button class="btn btn-ghost btn-sm" id="jyArkKey" title="粘贴火山方舟 API Key（只存在本机浏览器），换电脑不必再手动放 key 文件">🔑 火山密钥</button>
+          <button class="btn btn-ghost btn-sm" id="jyConnect">连接制作服务</button>
+        </div>
       </div>
       <div class="video-modebar">
         <div class="chips" role="group" aria-label="制作方式">
@@ -195,6 +198,17 @@
         <p id="jyModeHint">剪映 Skill · 必须上传照片或视频 · 输出可编辑工程</p>
       </div>
       <p id="jyStatus" class="video-connection" role="status">正在连接本机制作服务…</p>
+      <details class="video-guide" id="jyStartGuide">
+        <summary>换电脑？先启动本机制作服务（点此复制启动脚本）</summary>
+        <p class="hint">「视频制作」连的是<strong>当前这台电脑</strong>的 <code>127.0.0.1:4191</code> 制作服务，不经过线上。换电脑后先在那台电脑把服务启动起来，再点「连接制作服务」。前提：那台电脑已有工作台文件夹（含 <code>workbench/</code>、<code>scripts/</code>、<code>start-jianying.cjs</code>）并已安装 Node.js。</p>
+        <pre class="video-guide-code"><code id="jyStartCode">#!/bin/zsh
+cd "$(dirname "$0")/workbench" || exit 1
+node start-jianying.cjs</code></pre>
+        <div class="panel-actions">
+          <button class="btn btn-ghost btn-sm" id="jyStartCopy" type="button">复制启动脚本</button>
+        </div>
+        <p class="hint">用法：① 在工作台文件夹下新建文本文件 <code>启动剪映制作.command</code>，把上面三行粘进去；② 首次给一次执行权限：终端运行 <code>chmod +x 启动剪映制作.command</code>；③ 双击运行（或终端 <code>./启动剪映制作.command</code>）。剪映不可用时火山生成仍可使用；启动后本机服务监听 <code>http://127.0.0.1:4191</code>。</p>
+      </details>
     </div>
     <form id="jyForm">
       <div class="video-layout">
@@ -442,31 +456,58 @@
   <div class="modal-card">
     <div class="panel-head">
       <div>
-        <h3>数据源 · 抖音 + 小红书站内作品</h3>
-        <p class="hint" id="secureState">粘贴红狐密钥即可，无需注册登录</p>
+        <h3>密钥 · 数据源 + 视频制作</h3>
+        <p class="hint" id="secureState">粘贴密钥即可，无需注册登录</p>
       </div>
       <button class="btn btn-ghost btn-sm" id="secureClose" type="button">关闭</button>
     </div>
 
-    <p class="hint" id="secureHowto">
-      在红狐 Hub 后台复制你的 API Key（<code>ak_</code> 开头）粘到下面。
-      它<strong>只保存在这台设备的浏览器里</strong> —— 仅采集时传给工作台服务端、不写进网页源码；
-      采集时随请求带给本机服务端，由服务端通过红狐官方 MCP
-      （抖音 <code>redfox-douyin-mcp</code> / 小红书 <code>redfox-xiaohongshu-mcp</code>）取数，密钥不落库、不写日志。管理员也可统一配置服务端密钥，其他设备无需重复粘贴。
-    </p>
+    <section class="key-section">
+      <h4 class="key-title">① 数据源 · 抖音 + 小红书站内作品</h4>
+      <p class="hint" id="secureHowto">
+        在红狐 Hub 后台复制你的 API Key（<code>ak_</code> 开头）粘到下面。
+        它<strong>只保存在这台设备的浏览器里</strong> —— 不写进网页源码；
+        采集时随请求带给工作台服务端，由服务端通过红狐官方 MCP
+        （抖音 <code>redfox-douyin-mcp</code> / 小红书 <code>redfox-xiaohongshu-mcp</code>）取数，密钥不落库、不写日志。管理员也可统一配置服务端密钥，其他设备无需重复粘贴。
+      </p>
 
-    <div class="field-row">
-      <input id="secureKeyInput" type="password" placeholder="ak_..." autocomplete="off" spellcheck="false">
-      <button class="btn btn-primary" id="secureKeySave" type="button">保存</button>
-    </div>
-    <p class="field-err" id="secureKeyErr" hidden></p>
+      <div class="field-row">
+        <input id="secureKeyInput" type="password" placeholder="ak_..." autocomplete="off" spellcheck="false">
+        <button class="btn btn-primary" id="secureKeySave" type="button">保存</button>
+      </div>
+      <p class="field-err" id="secureKeyErr" hidden></p>
 
-    <div class="panel-actions">
-      <button class="btn btn-ghost btn-sm" id="secureKeyShow" type="button">显示</button>
-      <button class="btn btn-ghost btn-sm" id="secureKeyClear" type="button">清除密钥</button>
-    </div>
+      <div class="panel-actions">
+        <button class="btn btn-ghost btn-sm" id="secureKeyShow" type="button">显示</button>
+        <button class="btn btn-ghost btn-sm" id="secureKeyClear" type="button">清除密钥</button>
+      </div>
 
-    <p class="hint">没配也能正常用，只是采不到抖音 / 小红书的站内爆款数据。换设备 / 换浏览器需要重新粘贴一次。</p>
+      <p class="hint">没配也能正常用，只是采不到抖音 / 小红书的站内爆款数据。换设备 / 换浏览器需要重新粘贴一次。</p>
+    </section>
+
+    <section class="key-section">
+      <h4 class="key-title">② 视频制作 · 火山方舟 AI 生成</h4>
+      <p class="hint" id="arkState">未配置 —— 「视频制作 · 生成」会提示未配置火山方舟密钥</p>
+      <p class="hint" id="arkHowto">
+        在火山方舟控制台复制 API Key 粘到下面。它<strong>只保存在这台设备的浏览器里</strong>；
+        「生成」时随请求发给<strong>本机</strong>制作服务（<code>127.0.0.1</code>），
+        由服务端调用火山接口，<strong>不经云端、不落盘、不写日志</strong>。
+        换电脑后粘贴一次即可，不必再手动放 <code>~/.workbuddy/volc_mediakit.key</code>。
+      </p>
+
+      <div class="field-row">
+        <input id="arkKeyInput" type="password" placeholder="火山方舟 API Key" autocomplete="off" spellcheck="false">
+        <button class="btn btn-primary" id="arkKeySave" type="button">保存</button>
+      </div>
+      <p class="field-err" id="arkKeyErr" hidden></p>
+
+      <div class="panel-actions">
+        <button class="btn btn-ghost btn-sm" id="arkKeyShow" type="button">显示</button>
+        <button class="btn btn-ghost btn-sm" id="arkKeyClear" type="button">清除密钥</button>
+      </div>
+
+      <p class="hint">「剪辑」模式在本机剪映里完成，与这把密钥无关；它只用于「生成」模式的 AI 视频。</p>
+    </section>
   </div>
 </div>
 
@@ -491,6 +532,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
 <script src="./secure-store.js"></script>
 <script src="./trend-policy.js"></script>
+<script src="./humanizer-policy.js"></script>
 <script src="./account-strategy.js"></script>
 <script src="./app.js"></script>
 <script src="./account-settings.js"></script>

@@ -4,20 +4,27 @@
   let token='',assets=[],source={},busy=false,mode='edit',requestId=null,jobsSignature='',refreshing=false,generation={ready:false},device={online:false};
   const thumbs=new Map(),outputs=new Map();
   const message=(text,error=false)=>{$('jyMessage').textContent=text;$('jyMessage').style.color=error?'var(--danger)':'';};
+  /* 页面粘贴的火山密钥（存在本机浏览器），随每个请求带给本机服务；
+     服务端只在这次调用里用，不落盘、不写日志。没配就不带这个头，回落到本机原有配置
+     （ARK_API_KEY 环境变量 / ~/.workbuddy/volc_mediakit.key），所以老用法不受影响。 */
+  const arkKey=()=>{try{return (window.SecureStore && window.SecureStore.getArkKey && window.SecureStore.getArkKey()) || '';}catch(e){return '';}};
   async function api(route,options={}){
-    const r=await fetch(base+route,{...options,headers:{Authorization:'Bearer '+token,...options.headers},signal:AbortSignal.timeout(120000)});
+    const ark=arkKey();
+    const r=await fetch(base+route,{...options,headers:{Authorization:'Bearer '+token,...(ark?{'X-Ark-Key':ark}:{}),...options.headers},signal:AbortSignal.timeout(120000)});
     if(!r.ok){const e=await r.json().catch(()=>({}));throw Error(e.error || '请求失败 '+r.status);}return r;
   }
   const post=(route,body)=>api(route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
   function connection(){
-    const text=mode==='edit'?(device.online?(device.device.ready?'剪映已连接 · Skill '+device.device.skill_version:'剪映未就绪：'+device.device.error):'剪映执行器离线，请启动本机制作服务。'):(generation.ready?'火山方舟已连接 · 将根据拍摄脚本生成视频':(generation.error || '正在检查火山连接…'));
+    const genText=generation.ready?'火山方舟已连接 · 将根据拍摄脚本生成视频'
+      :(!arkKey()?'未配置火山方舟密钥 —— 点上方「🔑 火山密钥」粘贴一次即可':(generation.error || '正在检查火山连接…'));
+    const text=mode==='edit'?(device.online?(device.device.ready?'剪映已连接 · Skill '+device.device.skill_version:'剪映未就绪：'+device.device.error):'剪映执行器离线，请启动本机制作服务。'):genText;
     $('jyStatus').textContent=text;$('jyStatus').classList.toggle('is-error',mode==='edit'?!device.online || !device.device?.ready:!generation.ready);
   }
   async function connect(){
     $('jyConnect').disabled=true;
     try{const r=await fetch(base+'session',{headers:{'X-Jianying-Studio':'1'},signal:AbortSignal.timeout(4000)});if(!r.ok)throw Error('制作服务未就绪');token=(await r.json()).token;
       await Promise.all([refresh(),api('generation/status').then(r=>r.json()).then(data=>{generation=data;})]);connection();$('jyConnect').textContent='重新连接';
-    }catch(e){$('jyStatus').textContent='未连接本机制作服务。请运行“启动剪映制作.command”，并允许浏览器访问本地网络。';$('jyStatus').classList.add('is-error');}
+    }catch(e){$('jyStatus').textContent='未连接本机制作服务 —— 请在这台电脑运行「启动剪映制作.command」（展开上方说明可复制脚本），并允许浏览器访问本地网络。';$('jyStatus').classList.add('is-error');}
     finally{$('jyConnect').disabled=false;}
   }
   function setMode(next){
@@ -35,6 +42,8 @@
     $('jyFormat').textContent=gen?'9:16 · 720P':'9:16 · 1080P · 30FPS';
     $('jyRules').textContent=gen?'根据脚本生成新画面与声音，参考照片可选。生成会产生火山 API 用量；成功后自动取回视频文件。':'按素材顺序剪辑，保留真实画面。短视频不足时由照片补足；脚本与备注随工程保存，供剪映内调整。';
     message(gen?'无需上传素材，填写脚本即可生成。':'选择素材后即可开始剪辑。');connection();renderAssets();
+    /* 切到「生成」时重新探测一次火山连接：刚在密钥弹窗里粘贴过 key 的情况能立刻反映出来 */
+    if(gen&&token)api('generation/status').then(r=>r.json()).then(d=>{generation=d;connection();}).catch(()=>{});
   }
   function lock(value){busy=value;for(const id of ['jySubmit','jyFiles','jyModeEdit','jyModeGenerate','jyImport'])$(id).disabled=value;renderAssets();}
   function renderAssets(){
@@ -122,7 +131,17 @@
   }
   async function refresh(){if(!token||refreshing)return;refreshing=true;try{const [status,jobs]=await Promise.all([api('status').then(r=>r.json()),api('jobs').then(r=>r.json())]);device=status;connection();renderJobs(jobs);$('jyPollingStatus').textContent='每5秒自动刷新 · 页面最近更新 '+new Date().toLocaleTimeString('zh-CN',{hour12:false});$('jyPollingStatus').style.color='';}finally{refreshing=false;}}
   $('jyModeEdit').onclick=()=>setMode('edit');$('jyModeGenerate').onclick=()=>setMode('generate');$('jyConnect').onclick=connect;$('jyRefresh').onclick=()=>refresh().catch(e=>message(e.message,true));
+  /* 换电脑时复制本机制作服务的启动脚本 */
+  const startCopy=$('jyStartCopy');
+  if(startCopy)startCopy.onclick=async()=>{
+    const code=($('jyStartCode')?.textContent || '').replace(/\s+$/,'')+'\n';
+    try{await navigator.clipboard.writeText(code);startCopy.textContent='已复制 ✓';}
+    catch(e){const r=document.createRange();r.selectNodeContents($('jyStartCode'));const sel=window.getSelection();sel.removeAllRanges();sel.addRange(r);startCopy.textContent='已选中 · 按 ⌘C 复制';}
+    setTimeout(()=>{startCopy.textContent='复制启动脚本';},1800);
+  };
   setInterval(()=>{if($('view-video').classList.contains('is-active'))refresh().catch(()=>{$('jyPollingStatus').textContent='状态刷新失败，请检查本机服务或点击重新连接。';$('jyPollingStatus').style.color='var(--danger)';});},5000);
   window.addEventListener('beforeunload',()=>{for(const url of [...thumbs.values(),...outputs.values()])URL.revokeObjectURL(url);});
+  /* 供「密钥」弹窗保存火山密钥后立即重新探测连接状态 */
+  window.JianyingStudio={reconnect:()=>connect(),refreshStatus:()=>{if(!token)return;api('generation/status').then(r=>r.json()).then(d=>{generation=d;connection();}).catch(()=>{});}};
   connect();
 })();

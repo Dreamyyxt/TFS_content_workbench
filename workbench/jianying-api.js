@@ -101,7 +101,7 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Vary','Origin');
         res.setHeader('Access-Control-Allow-Methods','GET, POST, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers','Authorization, Content-Type, X-Jianying-Studio, X-Job-Claim');
+        res.setHeader('Access-Control-Allow-Headers','Authorization, Content-Type, X-Jianying-Studio, X-Job-Claim, X-Ark-Key');
         res.setHeader('Access-Control-Allow-Private-Network','true');
       }
       if (req.method === 'OPTIONS') {res.writeHead(204);res.end();return true;}
@@ -113,6 +113,10 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
       const worker = route.startsWith('worker/');
       authorize(req, worker ? workerToken : userToken);
       init();
+      /* 页面粘贴的火山密钥：随 X-Ark-Key 头进来，仅驻留内存、不落盘、不写日志。
+         头为空时不动，保留环境变量 / 本机 key 文件的既有行为。 */
+      const arkKey = String(req.headers['x-ark-key'] || '').trim();
+      if (volc && arkKey && typeof volc.setKey === 'function') volc.setKey(arkKey);
       for (const job of state.jobs) {
         if (job.status === 'building' && job.lease_until < Date.now()) {
           job.status='failed';job.error='Mac 连接中断，请重试';delete job.claim;save();

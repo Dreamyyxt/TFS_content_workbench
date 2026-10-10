@@ -1,22 +1,15 @@
 /* =====================================================================
-   第五季 · 内容工作台 —— 数据源密钥（免登录，直接粘贴）
+   第五季 · 内容工作台 —— 密钥存储（免登录，直接粘贴）
    ---------------------------------------------------------------------
-   抖音站内爆款数据来自红狐 Hub（第三方接口），需要一个 ak_ 开头的密钥。
+   这里管两把密钥，都只写进**当前浏览器**的 localStorage：
+     · 数据源 / 抖音 + 小红书站内作品 —— 红狐 Hub（第三方接口），ak_ 开头
+       → localStorage['wj_redfox_key']
+     · 视频制作 / AI 生成 —— 火山方舟（Ark）API Key
+       → localStorage['wj_ark_key']
 
-   这里刻意做到最简：
-     · 不注册、不登录、不建表；
-     · 密钥只写进**当前浏览器**的 localStorage，仅采集时传给工作台服务端、不进网页源码；
-     · 采集时前端把密钥随请求头 x-redfox-key 透传给工作台服务端，
-       服务端只做转发（不落盘、不落库、不写日志），用完即弃。
-
+   共同点：不注册、不登录、不建表；不进网页源码；用时随请求头透传给服务端，
+   服务端只在该次调用里用，不落盘、不落库、不写日志。
    代价：换设备 / 换浏览器 / 清缓存后要重新粘贴一次。
-
-   对外接口（挂 window.SecureStore）：
-     getKey()         取密钥（未配置返回 ''）
-     isConfigured()   是否已配置
-     saveKey(raw)     保存（校验格式）
-     clearKey()       清除
-     masked()         用于界面展示的脱敏串
    ===================================================================== */
 (function () {
 'use strict';
@@ -66,11 +59,63 @@ function clearKey(){
   write('');
 }
 
+/* ---- 火山方舟（视频制作 · AI 生成）-------------------------------------
+   火山 API Key 没有固定前缀，所以只做「非空 / 无空白字符 / 长度合理」的宽松校验；
+   是否真的可用，交给服务端调火山 /models 探测后再告诉用户。
+   命中优先级在服务端：页面粘贴 > ARK_API_KEY 环境变量 > ~/.workbuddy/volc_mediakit.key，
+   所以没配这个也不影响原本在本机放 key 文件的用法。 --------------------- */
+var LS_ARK = 'wj_ark_key';
+var memArk = '';
+
+function readArk(){
+  try { return String(localStorage.getItem(LS_ARK) || '').trim(); }
+  catch (e) { return ''; }
+}
+
+function writeArk(v){
+  try { v ? localStorage.setItem(LS_ARK, v) : localStorage.removeItem(LS_ARK); }
+  catch (e) { /* 隐私模式 / 存储被禁用时静默降级，本次会话内仍可用 */ }
+}
+
+function getArkKey(){
+  var k = readArk();
+  if (!k) k = memArk;
+  return k || '';
+}
+
+function isArkConfigured(){ return !!getArkKey(); }
+
+function maskedArk(){
+  var k = getArkKey();
+  if (!k) return '';
+  return k.length > 12 ? (k.slice(0, 4) + '••••••' + k.slice(-4)) : (k.slice(0, 2) + '••••');
+}
+
+function saveArkKey(raw){
+  var key = String(raw == null ? '' : raw).trim().replace(/^["']|["']$/g, '');
+  if (!key) throw new Error('请先粘贴火山方舟 API Key');
+  if (!/^[\x21-\x7e]+$/.test(key)) throw new Error('密钥里夹了空格或换行，请检查是否复制完整');
+  if (key.length < 16) throw new Error('密钥看起来不完整，请重新复制一次');
+  memArk = key;
+  writeArk(key);
+  return key;
+}
+
+function clearArkKey(){
+  memArk = '';
+  writeArk('');
+}
+
 window.SecureStore = {
   getKey: getKey,
   isConfigured: isConfigured,
   masked: masked,
   saveKey: saveKey,
-  clearKey: clearKey
+  clearKey: clearKey,
+  getArkKey: getArkKey,
+  isArkConfigured: isArkConfigured,
+  maskedArk: maskedArk,
+  saveArkKey: saveArkKey,
+  clearArkKey: clearArkKey
 };
 })();

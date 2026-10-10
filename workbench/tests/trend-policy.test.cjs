@@ -10,6 +10,22 @@ test('account keyword selection uses saved terms and skips disabled accounts',()
 test('cache isolates credentials, coalesces requests and never caches failures',async()=>{
  const cache=policy.createCache();let calls=0;const run=async()=>{calls++;return {ok:true};};await Promise.all([cache('a',run),cache('a',run)]);assert.equal(calls,1);assert.equal((await cache('a',run)).cached,true);await cache('b',run);assert.equal(calls,2);const fail=async()=>{calls++;return {ok:false};};await cache('c',fail);await cache('c',fail);assert.equal(calls,4);
 });
+test('season anchors pick up nearby holidays and always reserve keyword slots for them',()=>{
+ const s=policy.seasons('2026-10-10');
+ assert.equal(s.season,'秋季');
+ assert.ok(s.active.some(x=>x.name==='秋季'));
+ assert.ok(s.upcoming.some(x=>x.name==='万圣节'));
+ assert.ok(policy.seasons('2026-10-31').active.some(x=>x.name==='万圣节'));
+ assert.ok(policy.seasons('2026-11-05').active.some(x=>x.name==='双11大促'));
+ assert.ok(policy.seasons('2026-10-20').active.some(x=>x.name==='万圣节'));
+ const kw=policy.searchKeywords([{direction:'口播行业'}],'2026-10-10');
+ assert.ok(kw.includes('美甲店经营'));
+ assert.ok(kw.includes('万圣节美甲'));
+ assert.ok(kw.length<=11);
+ const crowded=policy.searchKeywords(Array.from({length:12},(_,i)=>({searchKeywords:'词'+i})),'2026-10-10');
+ assert.ok(crowded.includes('秋季美甲'));
+ assert.ok(crowded.length<=11);
+});
 test('redfox survives tool failure via REST, filters before ranking and reports partial platforms',async()=>{
  const source=fs.readFileSync(require.resolve('../server'),'utf8');const from=source.indexOf('async function collectRedfox('),to=source.indexOf('/* =========================================================================',from);const progress=[];
  const context={TrendPolicy:policy,REDFOX_KEYWORDS:['美甲'],mcpOpen:async()=>'',dySearchWorksMcp:async()=>{throw Error('tool unavailable');},redfoxSearch:async()=>[{title:'new',url:'a',publish:new Date().toISOString()},{title:'old',url:'b',publish:'2020-01-01'}],xhsSearchWorksMcp:async()=>{throw Error('xhs unavailable');},xhsHotwordsMcp:async()=>{throw Error('hot unavailable');},sleep:async()=>{},shortErr:e=>e.message,distillTopicHotwords:()=>[]};vm.createContext(context);vm.runInContext(source.slice(from,to)+';globalThis.run=collectRedfox;',context);const r=await context.run('test',{days:7},p=>progress.push(p));assert.equal(r.ok,true);assert.equal(r.dy_channel,'rest');assert.equal(r.total_works,1);assert.equal(r.dropped.old,1);assert.equal(r.platforms.xiaohongshu.status,'partial');assert.ok(r.warnings.length);assert.ok(progress.some(p=>p.platform==='小红书'));

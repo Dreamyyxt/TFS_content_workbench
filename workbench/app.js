@@ -759,6 +759,8 @@ function renderTrend(){
       ((rfDy || rfXhs)
         ? ' · 含站内采样作品：抖音 ' + rfDy + ' 条 · 小红书 ' + rfXhs + ' 条'
         : (p.redfox?.warnings?.length?' · 本次红狐采集未取得作品':' · 未取得站内作品数据（检查数据源配置）')) +
+      ((p.redfox?.general?.length) ? ' · 常青参考 ' + p.redfox.general.length + ' 条' : '') +
+      ((p.redfox?.xhs_trend?.length) ? ' · 全站热榜 ' + p.redfox.xhs_trend.length + ' 条' : '') +
       ' · 红狐作品限定近7天；公开网页另标发布日期'+(p.redfox?.cached?' · 红狐使用10分钟缓存':'')+(p.redfox?.dropped?' · 剔除旧作品 '+(p.redfox.dropped.old||0)+' 条、日期未知 '+(p.redfox.dropped.unknown||0)+' 条':'')+((p.redfox?.warnings||[]).length?' · 部分接口异常：'+p.redfox.warnings.join('；'):'');
   } else if (t.source === 'seed'){
     meta.textContent = '内置底稿，未联网 —— 点「实时采集风向」抓一次本季真实风向';
@@ -866,8 +868,21 @@ function corpusPrompt(c){
   const d = new Date();
   const dateStr = d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate());
   const L = [];
-  L.push('今天是 ' + dateStr + '。下面是从公网「刚刚」抓回来的原始材料：抖音官方实时热榜 + 抖音/小红书站内采样作品（红狐数据） + 搜索引擎返回的美甲公开内容。');
+  L.push('今天是 ' + dateStr + '。下面是从公网「刚刚」抓回来的原始材料：抖音官方实时热榜 + 抖音/小红书站内采样作品（红狐数据） + 搜索引擎返回的美甲公开内容 + 当期全站最热参考。');
   L.push('');
+  /* 时令锚点：先把「今天处在哪个节点」讲清楚，模型才不会只从泛热词里硬扯。 */
+  let seasonNow = null;
+  try{ seasonNow = TrendPolicy.seasons(); }catch(e){ /* 拿不到就不放这一段 */ }
+  if (seasonNow){
+    const act = (seasonNow.active || []).filter(a => a.name !== seasonNow.season).map(a => a.name);
+    const up = (seasonNow.upcoming || []).slice(0, 3).map(a => a.name + '（' + a.days + ' 天后）');
+    L.push('【零、当前时令节点（按当天日期推导，用来决定该提前做什么）】');
+    L.push('所处季节：' + seasonNow.season + '。' +
+      (act.length ? '正在窗口内的节点：' + act.join(' / ') + '。' : '当前没有正在窗口内的营销节点。') +
+      (up.length ? '即将到来：' + up.join(' / ') + '，美甲内容要提前两三周铺，别等到当天才拍。' : ''));
+    L.push('要求：优先把可借势的节点用起来，写成「节点 + 款式/情绪」的趋势说法；不要编造具体活动、折扣或日期；节点跟门店定位不搭就别硬蹭。');
+    L.push('');
+  }
   if (c.douyin && c.douyin.length){
     L.push('【一、抖音实时热榜（官方接口 · ' + (c.douyin_active_time ? '榜更新时间 ' + c.douyin_active_time : '实时') + ' · 全站总榜）】');
     c.douyin.slice(0, 30).forEach((w, i) =>
@@ -892,6 +907,24 @@ function corpusPrompt(c){
       L.push('另外，从近期小红书爆款笔记的话题标签里还提炼出这些词，可作为笔记标题 / 文案标签：' +
         c.redfox.xhs_extra.slice(0, 20).map(w => w.word).join(' / '));
     }
+    L.push('');
+  }
+  if (c.redfox && c.redfox.general && c.redfox.general.length){
+    L.push('【一之四、抖音「常青」参考（用综合排序采样的『长期跑得动』内容）】');
+    L.push('这批是按相关性/总互动排出来的样本，发布日可能较早 —— 用来判断「什么题材长期有市场」，' +
+      '**绝不能当作本周潮流或当下热度讲**。本段不参与来源编号，正文里不要给它们加角标。');
+    c.redfox.general.forEach((x, i) =>
+      L.push((i+1) + '. [' + x.publish + '] 赞' + x.like + ' | ' + x.title + (x.author ? ' @' + x.author : '')));
+    L.push('');
+  }
+  if (c.redfox && c.redfox.xhs_trend && c.redfox.xhs_trend.length){
+    L.push('【一之五、小红书「当期全站最热」（跨品类，' +
+      (c.redfox.xhs_trend_total ? '区间内约 ' + c.redfox.xhs_trend_total + ' 条，取前 ' + c.redfox.xhs_trend.length + ' 条' :
+        '取前 ' + c.redfox.xhs_trend.length + ' 条') + '）】');
+    L.push('注意：这是**全站**热度，不是美甲垂类。只用来判断「此刻大众注意力在哪、有没有可借的节日 / 情绪 / 话题 / 表达方式」，' +
+      '不要把它当作美甲行业风向，也不要把里面的其他品类硬套到美甲上。本段不参与来源编号。');
+    c.redfox.xhs_trend.forEach((x, i) =>
+      L.push((i+1) + '. [' + x.publish + '] 赞' + x.like + ' | ' + x.title));
     L.push('');
   }
   if (c.sources && c.sources.length){
@@ -967,7 +1000,8 @@ async function collectWebTrend(){
   const t0 = Date.now();
   try{
     let corpus = null;
-    const redfoxPending=fetchRedfox({days:7,keywords:TrendPolicy.keywords(AccountStrategy.getConfig())},p=>{
+    const kwNow = TrendPolicy.searchKeywords(AccountStrategy.getConfig());
+    const redfoxPending=fetchRedfox({days:7,keywords:kwNow},p=>{
       $('#trendStreamLabel').textContent='红狐采集中：'+p.platform+' · '+p.keyword+' · '+p.stage+'（已用 '+Math.round((Date.now()-t0)/1000)+' 秒）';
     });
     try{
@@ -990,7 +1024,10 @@ async function collectWebTrend(){
       if (rf && rf.unavailable){redfoxNote = '站内作品未取到（' + rf.unavailable + '）';corpus.redfox={works:0,xhs_works:0,warnings:[rf.unavailable],keywords:[],platforms:{},dropped:{}};}
       else if (rf){
         const rfm = mergeRedfox(corpus, rf);
-        if (rfm) redfoxNote = '近7天作品：抖音 ' + rfm.works + ' 条 · 小红书 ' + rfm.xhs_works + ' 条'+(rf.cached?'（10分钟缓存）':'')+(rfm.warnings.length?'；部分接口异常：'+rfm.warnings.join('；'):'');
+        if (rfm) redfoxNote = '近7天作品：抖音 ' + rfm.works + ' 条 · 小红书 ' + rfm.xhs_works + ' 条'+
+          (rfm.general && rfm.general.length ? ' · 常青参考 ' + rfm.general.length + ' 条' : '')+
+          (rfm.xhs_trend && rfm.xhs_trend.length ? ' · 全站热榜 ' + rfm.xhs_trend.length + ' 条' : '')+
+          (rf.cached?'（10分钟缓存）':'')+(rfm.warnings.length?'；部分接口异常：'+rfm.warnings.join('；'):'');
       }
     }catch(e){
       console.warn('[数据源] 红狐环节异常：', e);
@@ -1004,7 +1041,9 @@ async function collectWebTrend(){
     const st = corpus.stats || {};
     $('#trendStreamLabel').textContent =
       '采集完成：抖音热榜 ' + (st.douyin || 0) + ' 条 · 联网来源 ' + (st.web || 0) + ' 条' +
-      (st.redfox ? ' · 站内作品 抖音 ' + (st.redfox_dy || 0) + ' / 小红书 ' + (st.redfox_xhs || 0) + ' 条' : '') +
+      (st.redfox ? ' · 站内作品 抖音 ' + (st.redfox_dy || 0) + ' / 小红书 ' + (st.redfox_xhs || 0) + ' 条' +
+        (st.redfox_general ? ' · 常青参考 ' + st.redfox_general + ' 条' : '') +
+        (st.redfox_trend ? ' · 全站热榜 ' + st.redfox_trend + ' 条' : '') : '') +
       '，正在让模型归纳（当前模型：' + (MODEL_ID || '—') + '）';
 
     const text = await llmStream([
@@ -1031,8 +1070,18 @@ async function collectWebTrend(){
     }
 
     const batch = 'W' + ts();
+    let seasonPayload = null;
+    try{
+      const sn = TrendPolicy.seasons();
+      seasonPayload = {
+        season: sn.season,
+        active: (sn.active || []).map(x => x.name),
+        upcoming: (sn.upcoming || []).slice(0, 3).map(x => x.name + '（' + x.days + ' 天后）')
+      };
+    }catch(e){ /* 拿不到就不写 */ }
     const payload = {
       mode: 'web',
+      season: seasonPayload,
       fetched_at: corpus.fetched_at || new Date().toISOString(),
       douyin_hot: (corpus.douyin || []).slice(0, 30).map(x => ({ word: x.word, hot: x.hot, related: !!x.related })),
       douyin_active_time: corpus.douyin_active_time || '',
@@ -1057,7 +1106,10 @@ async function collectWebTrend(){
         keywords: corpus.redfox.keywords,
         hot: (corpus.redfox.hot || []).map(h => ({ word: h.word, hot: h.hot, related: !!h.related })),
         xhs_hot: (corpus.redfox.xhs_hot || []).map(h => ({ word: h.word, hot: h.hot, related: !!h.related })),
-        xhs_extra: (corpus.redfox.xhs_extra || []).map(h => ({ word: h.word, hot: h.hot }))
+        xhs_extra: (corpus.redfox.xhs_extra || []).map(h => ({ word: h.word, hot: h.hot })),
+        general: (corpus.redfox.general || []).map(x => ({ platform: x.platform, title: x.title, author: x.author, url: x.url, like: x.like, publish: x.publish })),
+        xhs_trend: (corpus.redfox.xhs_trend || []).map(x => ({ title: x.title, like: x.like, publish: x.publish })),
+        xhs_trend_total: corpus.redfox.xhs_trend_total || 0
       } : null,
       sections: Array.isArray(json.sections) ? json.sections : [],
       materials: json.materials
@@ -1245,6 +1297,8 @@ function refreshPrompt(){
     profileBlock(),
     AccountStrategy.planRules(),
     g,
+    humanRules('', 'plan'),
+    '',
     '严格只输出一个 JSON 对象，不要任何解释文字、不要 markdown 代码块。结构：',
     '{',
     '  "summary": "不超过 120 字，当前美甲美睫赛道在抖音与小红书的流量风向结论，要区分两个平台打法",',
@@ -1293,7 +1347,7 @@ async function aiRefreshTrend(){
   const t0 = Date.now();
   try{
     const text = await llmStream([
-      { role:'system', content:'你是美甲美睫本地生活赛道的内容总监，熟悉抖音本地生活团购与小红书搜索流量的运营打法，输出严谨、具体、可直接执行；所有选题必须贴合给定门店的真实情况。' },
+      { role:'system', content:'你是美甲美睫本地生活赛道的内容总监，熟悉抖音本地生活团购与小红书搜索流量的运营打法，输出严谨、具体、可直接执行；所有选题必须贴合给定门店的真实情况。选题标题与钩子要是真人会说的话，不要 AI 腔和广告腔。' },
       { role:'user', content: refreshPrompt() }
     ], (delta, full, think) => {
       const sec = Math.round((Date.now() - t0) / 1000);
@@ -1491,6 +1545,10 @@ function renderScripts(){
     const r = live.level;
     const rLabel = r === 'pass' ? '合规通过' : r === 'warn' ? '有风险提示' : r === 'block' ? '命中禁用词' : '未自检';
     const hits = live.hits.length ? live.hits.map(h => h.group + '：' + h.word).join('；') : '无';
+    /* 去 AI 味自检：只统计需要改写的 AI 腔 / 广告腔，不含分镜表里的正常排版特征 */
+    const tone = humanTone(s.content);
+    const toneN = humanToneCount(tone);
+    const toneBrief = humanToneBrief(tone);
     const when = s.created_at ? new Date(s.created_at) : null;
     return '<article class="script-card">' +
       '<div class="script-head">' +
@@ -1509,6 +1567,7 @@ function renderScripts(){
           ? '<button class="btn btn-fix btn-sm" data-fixscript="' + s.id + '">一键替换禁用词</button>'
           : '') +
         (hits !== '无' ? '<span class="hint" style="margin:0">自检：' + esc(hits) + '</span>' : '') +
+        (toneN ? '<span class="hint" style="margin:0">去AI味：' + esc(toneBrief) + '</span>' : '') +
         '<span style="flex:1"></span>' +
         '<button class="btn-danger-ghost" data-delscript="' + s.id + '">删除</button>' +
       '</div>' +
@@ -1580,11 +1639,33 @@ async function autoFixScript(id){
 }
 
 /* 生成脚本 */
+/* 去 AI 味规则（humanizer-policy.js）。脚本没加载时静默跳过，不阻断主流程。 */
+function humanRules(account, scope){
+  try{ return window.HumanizerPolicy ? window.HumanizerPolicy.rules(account, scope) : ''; }
+  catch(e){ return ''; }
+}
+
+/* 成品去 AI 味自检：只提示，不阻断、不改写内容。 */
+function humanTone(text){
+  try{ return window.HumanizerPolicy ? window.HumanizerPolicy.scan(text) : null; }
+  catch(e){ return null; }
+}
+function humanToneBrief(res){
+  try{ return (res && window.HumanizerPolicy) ? window.HumanizerPolicy.briefText(res) : ''; }
+  catch(e){ return ''; }
+}
+function humanToneCount(res){
+  try{ return (res && window.HumanizerPolicy) ? window.HumanizerPolicy.countFor(res) : 0; }
+  catch(e){ return 0; }
+}
+
 function scriptPrompt(m){
   return [
     '请为下面这条素材写一支可直接开拍的短视频分镜脚本。',
     '',
     AccountStrategy.scriptRules(m.account),
+    '',
+    humanRules(m.account),
     '',
     '素材信息（如与上述账号定位冲突，以账号规则为准）：',
     '- 账号：' + m.account + '（平台：' + (m.platform || '') + '）',
@@ -1645,7 +1726,7 @@ async function generateScript(materialId, quiet){
   const t0 = Date.now();
   try{
     const text = await llmStream([
-      { role:'system', content:'你是短视频分镜编导，擅长抖音本地生活与小红书的内容节奏。输出严格使用 Markdown，分镜表必须是合法 Markdown 表格。' },
+      { role:'system', content:'你是短视频分镜编导，擅长抖音本地生活与小红书的内容节奏。输出严格使用 Markdown，分镜表必须是合法 Markdown 表格。口播必须是真人会说出来的话，不许有 AI 写作腔和广告腔。' },
       { role:'user', content: scriptPrompt(m) }
     ], (d, full, think) => {
       const sec = Math.round((Date.now() - t0) / 1000);
@@ -1667,6 +1748,8 @@ async function generateScript(materialId, quiet){
     const riskText = scan.hits.length
       ? scan.hits.map(h => h.group + '：' + h.word).join('；')
       : '无';
+    const toneText = humanToneBrief(humanTone(text));
+    const toneTail = toneText ? '；去 AI 味自检命中 ' + toneText : '；去 AI 味自检干净';
 
     const row = {
       material_id: m.id,
@@ -1686,11 +1769,11 @@ async function generateScript(materialId, quiet){
 
     if (!quiet){
       if (scan.level === 'block'){
-        toast('脚本已生成，但命中禁用词（' + riskText + '），发布前必须改写', 'err');
+        toast('脚本已生成，但命中禁用词（' + riskText + '），发布前必须改写' + toneTail, 'err');
       } else if (scan.level === 'warn'){
-        toast('脚本已生成，有风险提示：' + riskText, 'warn');
+        toast('脚本已生成，有风险提示：' + riskText + toneTail, 'warn');
       } else {
-        toast('脚本已生成，合规自检通过（' + Math.round((Date.now()-t0)/1000) + 's）', 'ok');
+        toast('脚本已生成，合规自检通过（' + Math.round((Date.now()-t0)/1000) + 's）' + toneTail, 'ok');
       }
     }
     return { ok:true, level:scan.level, riskText:riskText, title:m.title };
@@ -2817,12 +2900,16 @@ function renderSecureModal(){
   if (!m || m.hidden) return;
   const stateEl = $('#secureState'), input = $('#secureKeyInput'), errEl = $('#secureKeyErr');
   if (errEl) errEl.hidden = true;
+  const arkErrEl = $('#arkKeyErr');
+  if (arkErrEl) arkErrEl.hidden = true;
   if (!hasSecure()){
-    stateEl.textContent = '数据源模块没有加载成功，请刷新页面重试';
+    if (stateEl) stateEl.textContent = '密钥模块没有加载成功，请刷新页面重试';
+    const arkState0 = $('#arkState');
+    if (arkState0) arkState0.textContent = '密钥模块没有加载成功，请刷新页面重试';
     return;
   }
+  /* ① 数据源（红狐）—— 打开时永远不把明文回填到输入框，只给脱敏提示 */
   const key = window.SecureStore.getKey();
-  /* 打开时永远不把明文回填到输入框，只给脱敏提示 */
   if (input){
     input.value = '';
     input.type = 'password';
@@ -2832,9 +2919,25 @@ function renderSecureModal(){
   if (show) show.textContent = '显示';
   const clear = $('#secureKeyClear');
   if (clear) clear.hidden = !key;
-  stateEl.textContent = key
+  if (stateEl) stateEl.textContent = key
     ? '✅ 已配置 ' + window.SecureStore.masked() + ' · 只存在这台设备的浏览器里'
     : serverRedfoxConfigured ? '已使用服务端配置的红狐密钥，同一服务的设备可共用' : '未配置 —— 粘贴红狐密钥后，「实时采集风向」就会带上抖音站内作品';
+
+  /* ② 视频制作（火山方舟）—— 同样只给脱敏提示 */
+  const arkState = $('#arkState'), arkInput = $('#arkKeyInput');
+  const arkKey = window.SecureStore.getArkKey();
+  if (arkInput){
+    arkInput.value = '';
+    arkInput.type = 'password';
+    arkInput.placeholder = arkKey ? ('已配置：' + window.SecureStore.maskedArk() + '（粘贴新密钥可替换）') : '火山方舟 API Key';
+  }
+  const arkShow = $('#arkKeyShow');
+  if (arkShow) arkShow.textContent = '显示';
+  const arkClear = $('#arkKeyClear');
+  if (arkClear) arkClear.hidden = !arkKey;
+  if (arkState) arkState.textContent = arkKey
+    ? '✅ 已配置 ' + window.SecureStore.maskedArk() + ' · 只存在这台设备的浏览器里'
+    : '未配置 —— 「视频制作 · 生成」会提示未配置火山方舟密钥';
 }
 
 function bindSecureUI(){
@@ -2890,6 +2993,53 @@ function bindSecureUI(){
     toast('密钥已清除', 'ok');
     renderSecureModal();
   });
+
+  /* ---- ② 视频制作 · 火山方舟 ---- */
+  const arkErrEl = $('#arkKeyErr');
+  const failArk = msg => {
+    if (arkErrEl){ arkErrEl.hidden = false; arkErrEl.textContent = msg; }
+    else toast(msg, 'err');
+  };
+  const refreshJy = () => { try{ window.JianyingStudio && window.JianyingStudio.refreshStatus && window.JianyingStudio.refreshStatus(); }catch(e){} };
+  const doSaveArk = () => {
+    if (!hasSecure()) return failArk('密钥模块未加载，请刷新页面');
+    try{
+      SS().saveArkKey($('#arkKeyInput').value);
+      toast('火山密钥已保存在这台设备的浏览器里', 'ok');
+      renderSecureModal();
+      refreshJy();   /* 已连上本机制作服务时，立即重新探测一次火山连接 */
+    }catch(e){ failArk((e && e.message) || String(e)); }
+  };
+  const arkSaveBtn = $('#arkKeySave');
+  if (arkSaveBtn) arkSaveBtn.addEventListener('click', doSaveArk);
+  const arkInputEl = $('#arkKeyInput');
+  if (arkInputEl) arkInputEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter'){ e.preventDefault(); doSaveArk(); }
+  });
+  const arkShowBtn = $('#arkKeyShow');
+  if (arkShowBtn) arkShowBtn.addEventListener('click', () => {
+    const input = $('#arkKeyInput'), btn = $('#arkKeyShow');
+    const key = hasSecure() ? SS().getArkKey() : '';
+    if (input.type === 'password'){
+      if (!input.value && key) input.value = key;
+      input.type = 'text'; btn.textContent = '隐藏';
+    } else {
+      if (key && input.value === key) input.value = '';
+      input.type = 'password'; btn.textContent = '显示';
+    }
+  });
+  const arkClearBtn = $('#arkKeyClear');
+  if (arkClearBtn) arkClearBtn.addEventListener('click', async () => {
+    const ok = await askConfirm('清除火山方舟密钥？清除后「视频制作 · 生成」将无法调用火山接口。', '清除');
+    if (!ok) return;
+    if (hasSecure()) SS().clearArkKey();
+    toast('火山密钥已清除', 'ok');
+    renderSecureModal();
+    refreshJy();
+  });
+  /* 视频制作面板里的快捷入口，直接打开同一个密钥弹窗 */
+  const jyArk = $('#jyArkKey');
+  if (jyArk) jyArk.addEventListener('click', () => secureModalOpen(true));
 }
 
 /* 红狐采集：没配密钥就静默跳过，绝不影响主流程。
@@ -2956,13 +3106,34 @@ function mergeRedfox(corpus, rf){
     }));
   };
 
+  /* 常青样本（抖音·综合排序）与当期全站最热（小红书）都**不并进 sources**：
+     来源角标只留给「近 7 天 · 垂类相关」的作品，避免模型拿老内容或跨品类泛热冒充当下。
+     这两类作为独立参考段进提示词，不参与编号、不允许被当作美甲行业风向引用。 */
+  const brief = (it, platform) => ({
+    platform: platform,
+    title: it.title || '',
+    author: it.author || '',
+    url: it.url || '',
+    like: it.like || 0,
+    publish: String(it.publish || '').slice(0, 10)
+  });
+  const general = [], gseen = new Set();
+  ((rf.general && rf.general.works) || []).forEach(w => (w.items || []).forEach(it => {
+    const k = it.url || it.title;
+    if (!it.url || !k || gseen.has(k)) return;
+    gseen.add(k); general.push(brief(it, '抖音'));
+  }));
+  general.sort((a, b) => (b.like || 0) - (a.like || 0));
+  const xhsTrend = ((rf.xhs && rf.xhs.trend) || []).map(it => brief(it, '小红书'));
+
   const dySrcs = collect(rf.works, '抖音');
   const xhsSrcs = collect(rf.xhs && rf.xhs.works, '小红书');
   const srcs = dySrcs.concat(xhsSrcs);
 
   corpus.sources = (corpus.sources || []).concat(srcs);
   corpus.stats = Object.assign({}, corpus.stats || {}, {
-    redfox: srcs.length, redfox_dy: dySrcs.length, redfox_xhs: xhsSrcs.length
+    redfox: srcs.length, redfox_dy: dySrcs.length, redfox_xhs: xhsSrcs.length,
+    redfox_general: Math.min(general.length, 20), redfox_trend: xhsTrend.length
   });
   corpus.redfox = {
     works: dySrcs.length,
@@ -2970,6 +3141,9 @@ function mergeRedfox(corpus, rf){
     hot: (rf.hot || []).slice(0, 30),                        // 抖音：从爆款话题里提炼
     xhs_hot: ((rf.xhs && rf.xhs.hot) || []).slice(0, 30),   // 小红书：平台关联搜索词
     xhs_extra: ((rf.xhs && rf.xhs.extra) || []).slice(0, 20),
+    general: general.slice(0, 20),                          // 抖音·综合排序常青样本
+    xhs_trend: xhsTrend.slice(0, 20),                       // 小红书·当期全站最热（跨品类）
+    xhs_trend_total: (rf.xhs && rf.xhs.trend_total) || 0,
     channel: rf.dy_channel || 'mcp',
     keywords: rf.keywords || [],
     fetched_at: rf.fetched_at || '',

@@ -83,6 +83,28 @@ const QUERY_PLAN = [
       所以词要铺到 9 组、覆盖面拉开，否则只靠一个引擎会翻车。
    ③ win 只是发给引擎的时间参数，最终以本地解析出的真实发布日期为准（见 judge()）。 */
 
+/* 时令注入：按当天日期推导节日 / 季节，补进搜索引擎词表。
+   解决的是「紧跟时事」——上面那组固定词永远不知道马上到万圣节还是双11。
+   只收公历固定日期；农历节日（春节 / 七夕 / 中秋）每年日子都变，不自动推导。 */
+function seasonQueries() {
+  let s = null;
+  try { s = TrendPolicy.seasons(); } catch (e) { return []; }
+  const out = [], seen = new Set();
+  const push = (q, plat, tag) => {
+    if (!q || seen.has(q)) return;
+    seen.add(q);
+    out.push({ q, win: 14, plat, tag });
+  };
+  for (const a of (s.active || [])) {
+    if (a.name === s.season) push(s.season + '美甲 ' + NOW_YEAR, '时令', '时令 · ' + s.season);
+    else push(a.name + ' 美甲 ' + NOW_YEAR, '时令', '时令 · ' + a.name);
+  }
+  for (const u of (s.upcoming || []).slice(0, 2)) {
+    push(u.name + ' 美甲 ' + NOW_YEAR, '临近', '临近 · ' + u.name + '（' + u.days + '天后）');
+  }
+  return out.slice(0, 3);
+}
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
@@ -778,10 +800,14 @@ function distillTopicHotwords(works) {
     .slice(0, 40);
 }
 
-/* ---- 抖音：关键词搜站内爆款作品（redfox-douyin-mcp） ---- */
-async function dySearchWorksMcp(key, sess, keyword) {
-  const j = await mcpCallSafe('douyin', key, sess, 'douyin_search_articles',
-    { keyword, offset: 0 }, 30000);
+/* ---- 抖音：关键词搜站内爆款作品（redfox-douyin-mcp） ----
+   sort_type：'2' = 按发布时间（最新）；不传 = 综合（相关性排序，
+   实测会把几个月前的历史爆款混进来）。要「当下」就必须传 '2'，
+   否则近 7 天过滤后一条都留不下。不传（综合）留给「常青」通道用。 */
+async function dySearchWorksMcp(key, sess, keyword, sortType) {
+  const args = { keyword, offset: 0 };
+  if (sortType) args.sort_type = String(sortType);
+  const j = await mcpCallSafe('douyin', key, sess, 'douyin_search_articles', args, 30000);
   const list = Array.isArray(j.list) ? j.list : [];
   return list.map((x) => ({
     title: String(x.title || x.content || '').trim().slice(0, 160),
@@ -817,9 +843,11 @@ function mapXhsWork(x) {
   };
 }
 
-async function xhsSearchWorksMcp(key, sess, keyword) {
-  const j = await mcpCallSafe('xiaohongshu', key, sess, 'xiaohongshu_search_articles',
-    { keyword, offset: 0 }, 30000);
+/* sort_type 同抖音：'2' = 按发布时间（最新），不传 = 综合。 */
+async function xhsSearchWorksMcp(key, sess, keyword, sortType) {
+  const args = { keyword, offset: 0 };
+  if (sortType) args.sort_type = String(sortType);
+  const j = await mcpCallSafe('xiaohongshu', key, sess, 'xiaohongshu_search_articles', args, 30000);
   const list = Array.isArray(j.list) ? j.list : [];
   return list.map(mapXhsWork).filter((x) => x.title || x.url)
     .sort((a, b) => b.like - a.like || b.collect - a.collect);
@@ -849,6 +877,19 @@ async function xhsHotwordsMcp(key, sess, keyword) {
     articles: arts.map(mapXhsWork),
     total: Number(j.total) || 0,
   };
+}
+
+/* 小红书「当期全站最热」：**不传关键词**、只给日期区间，返回平台当期最热的笔记（跨品类）。
+   用途是补「节日 / 时事」维度 —— 回答「此刻全站在火什么」，这是按美甲词搜不出来的。
+   （红狐的榜单类工具实测全不可用：抖音 3 个榜单返回空、小红书日榜服务端报错、
+     黑马榜对美甲类词返回「查询结果为空」。这个接口是唯一还通的「当下」信号。） */
+async function xhsSiteTrendMcp(key, sess, days) {
+  const end = new Date();
+  const start = new Date(end.getTime() - (Number(days) || 7) * 86400000);
+  const j = await mcpCallSafe('xiaohongshu', key, sess, 'xiaohongshu_search_hot_notes',
+    { start_date: fmtDate(start), end_date: fmtDate(end), page_num: 1, page_size: 30 }, 45000);
+  const arts = Array.isArray(j.articles) ? j.articles : [];
+  return { items: arts.map(mapXhsWork), total: Number(j.total) || 0 };
 }
 
 async function redfoxSearch(key, keyword, days) {
@@ -885,7 +926,13 @@ async function redfoxSearch(key, keyword, days) {
     .sort((a, b) => b.like - a.like || b.collect - a.collect);
 }
 
-/* 采集入口：抖音走 redfox-douyin-mcp、小红书走 redfox-xiaohongshu-mcp，
+/* 采集入口 —— 五条线并行取数，任一失败不影响其他：
+   ① 抖音 · 近 N 天「最新」爆款（sort_type='2'）
+   ② 小红书 · 近 N 天「最新」爆款（sort_type='2'）
+   ③ 抖音 ·「综合」排序常青样本（不按 N 天过滤，保留近一年）
+      —— 回答「这个赛道什么内容长期跑得动」，与 ① 的「当下」互补
+   ④ 小红书 · 当期全站最热（无关键词 + 日期区间）—— 跨品类的「当下氛围」
+   ⑤ 小红书 · 平台关联搜索词
    串行 + 轻微间隔以降低被限流概率。返回结构里**不含任何密钥信息**。
    抖音 MCP 整体不可用时退回旧 REST 接口（多一重保障，能力不打折）。 */
 async function collectRedfox(key, opts, progress = () => {}) {
@@ -895,13 +942,17 @@ async function collectRedfox(key, opts, progress = () => {}) {
   const days = Math.min(30, Math.max(1, Number(opts.days) || 7));
   const dropped={old:0,unknown:0,future:0};
   function recent(items){const r=TrendPolicy.filter(items,days);for(const k of Object.keys(dropped))dropped[k]+=r[k];return r.items;}
+  /* 常青通道用它：只挡掉一年以上的，不按 N 天过滤 —— 那里的「旧」正是我们要的东西，
+     所以也不计进 dropped（dropped 的语义是「被时效窗口剔除的」）。 */
+  function withinYear(items){return TrendPolicy.filter(items,365).items;}
   const out = {
     ok: true, source: 'mcp', fetched_at: new Date().toISOString(), days, keywords,
     hot: [], hot_error: '',            // 抖音热词（从站内爆款的话题标签提炼）
-    works: [], total_works: 0,         // 抖音站内爆款作品
+    works: [], total_works: 0,         // 抖音站内爆款作品（近 N 天、按最新排序）
+    general: { works: [], total_works: 0, error: '' },   // 抖音综合排序常青样本
     dy_channel: 'mcp',                 // 抖音实际通道：mcp / rest
     dy_error: '',
-    xhs: { hot: [], extra: [], works: [], total_works: 0, total: 0, error: '', hot_error: '' },
+    xhs: { hot: [], extra: [], works: [], total_works: 0, total: 0, trend: [], trend_total: 0, trend_error: '', error: '', hot_error: '' },
     error: '',
   };
 
@@ -910,8 +961,8 @@ async function collectRedfox(key, opts, progress = () => {}) {
     const dySess = { sid: await mcpOpen('douyin', key) };
     for (const kw of keywords) {
       try {
-        progress({platform:"抖音",keyword:kw,stage:"搜索"});
-        let raw;try{raw=await dySearchWorksMcp(key, dySess, kw);}catch(e){raw=await redfoxSearch(key,kw,days);out.dy_channel="rest";}
+        progress({platform:"抖音",keyword:kw,stage:"最新"});
+        let raw;try{raw=await dySearchWorksMcp(key, dySess, kw, '2');}catch(e){raw=await redfoxSearch(key,kw,days);out.dy_channel="rest";}
         const items = recent(raw);
         out.works.push({ keyword: kw, count: items.length, items });
       } catch (e) {
@@ -939,6 +990,27 @@ async function collectRedfox(key, opts, progress = () => {}) {
   }
 
   out.total_works = out.works.reduce((n, w) => n + w.count, 0);
+
+  /* —— 抖音「综合」常青样本：只取前 2 个关键词，控制调用量。
+        刻意**不**按近 N 天过滤：综合排序返回的多是历史高互动内容，
+        那正是「长期跑得动」的参考，一过滤就什么都不剩。 —— */
+  try {
+    const gSess = { sid: await mcpOpen('douyin', key) };
+    for (const kw of keywords.slice(0, 2)) {
+      try {
+        progress({platform:'抖音',keyword:kw,stage:'常青参考'});
+        const items = withinYear(await dySearchWorksMcp(key, gSess, kw));
+        out.general.works.push({ keyword: kw, count: items.length, items });
+      } catch (e) {
+        out.general.works.push({ keyword: kw, count: 0, items: [], error: shortErr(e) });
+      }
+      await sleep(150);
+    }
+  } catch (e) {
+    out.general.error = shortErr(e);
+  }
+  out.general.total_works = out.general.works.reduce((n, w) => n + w.count, 0);
+
   const dyFlat = [];
   out.works.forEach((w) => (w.items || []).forEach((it) => dyFlat.push(it)));
   out.hot = distillTopicHotwords([...new Map(dyFlat.map(w=>[w.url||w.title,w])).values()]);
@@ -948,8 +1020,8 @@ async function collectRedfox(key, opts, progress = () => {}) {
     const xhsSess = { sid: await mcpOpen('xiaohongshu', key) };
     for (const kw of keywords) {
       try {
-        progress({platform:"小红书",keyword:kw,stage:"搜索"});
-        const items = recent(await xhsSearchWorksMcp(key, xhsSess, kw));
+        progress({platform:"小红书",keyword:kw,stage:"最新"});
+        const items = recent(await xhsSearchWorksMcp(key, xhsSess, kw, '2'));
         out.xhs.works.push({ keyword: kw, count: items.length, items });
       } catch (e) {
         out.xhs.works.push({ keyword: kw, count: 0, items: [], error: shortErr(e) });
@@ -970,15 +1042,27 @@ async function collectRedfox(key, opts, progress = () => {}) {
       out.xhs.works.forEach((w) => (w.items || []).forEach((it) => flat.push(it)));
       out.xhs.extra = distillTopicHotwords(flat).slice(0, 20);
     }
+    /* 当期全站最热（跨品类）—— 补「节日 / 时事」维度，只 1 次调用 */
+    try {
+      progress({platform:'小红书',keyword:'全站热榜',stage:'当期最热'});
+      const tr = await xhsSiteTrendMcp(key, xhsSess, days);
+      out.xhs.trend = tr.items.slice(0, 20);
+      out.xhs.trend_total = tr.total;
+    } catch (e) {
+      out.xhs.trend_error = shortErr(e);
+    }
   } catch (e) {
     out.xhs.error = shortErr(e);
   }
 
   out.dropped=dropped;
-  out.warnings=[...out.works,...out.xhs.works].filter(w=>w.error).map(w=>w.keyword+'：'+w.error);
-  out.platforms={douyin:{count:out.total_works,error:out.dy_error,status:out.works.some(w=>w.error)?'partial':out.total_works?'ok':'empty'},xiaohongshu:{count:out.xhs.total_works,error:out.xhs.error||out.xhs.hot_error,status:out.xhs.error?'error':out.xhs.works.some(w=>w.error)?'partial':out.xhs.total_works?'ok':'empty'}};
+  out.warnings=[...out.works,...out.xhs.works,...out.general.works].filter(w=>w.error).map(w=>w.keyword+'：'+w.error);
+  if(out.general.error)out.warnings.push('抖音常青通道：'+out.general.error);
+  if(out.xhs.trend_error)out.warnings.push('小红书当期最热：'+out.xhs.trend_error);
+  out.platforms={douyin:{count:out.total_works,general:out.general.total_works,error:out.dy_error,status:out.works.some(w=>w.error)?'partial':out.total_works?'ok':'empty'},xiaohongshu:{count:out.xhs.total_works,trend:out.xhs.trend.length,error:out.xhs.error||out.xhs.hot_error,status:out.xhs.error?'error':out.xhs.works.some(w=>w.error)?'partial':out.xhs.total_works?'ok':'empty'}};
   out.ok = out.total_works > 0 || out.xhs.total_works > 0 ||
-    out.hot.length > 0 || out.xhs.hot.length > 0;
+    out.hot.length > 0 || out.xhs.hot.length > 0 ||
+    out.general.total_works > 0 || out.xhs.trend.length > 0;
   if (!out.ok) {
     out.error = out.dy_error || out.xhs.error || out.hot_error || out.xhs.hot_error || '红狐 MCP 没有返回数据';
   }
@@ -993,7 +1077,7 @@ async function collectTrend() {
   const fetchedAt = new Date();
   const [hot, search, proDy, proXhsRes] = await Promise.all([
     douyinHot(),
-    searchAll(QUERY_PLAN),
+    searchAll(QUERY_PLAN.concat(seasonQueries())),
     proDouyin(),
     proXhs(),
   ]);
@@ -1182,6 +1266,7 @@ const STATIC_FILES = new Set([
   '/jianying-studio.js',
   '/secure-store.js',
   '/trend-policy.js',
+  '/humanizer-policy.js',
 ]);
 const SRC_EXT_RE = /\.(js|mjs|cjs|jsx|ts|tsx|json|md|markdown|map|txt|lock|yml|yaml|toml|env|py|sh)$/i;
 
@@ -1297,7 +1382,7 @@ const server = http.createServer(async (req, res) => {
       opts = {};
     }
     try {
-      const cacheKey=crypto.createHash('sha256').update(key+'\0'+JSON.stringify({keywords:opts.keywords||REDFOX_KEYWORDS,days:opts.days||7})).digest('hex');
+      const cacheKey=crypto.createHash('sha256').update(key+'\0'+JSON.stringify({v:2,keywords:opts.keywords||REDFOX_KEYWORDS,days:opts.days||7})).digest('hex');
       const streaming=String(req.headers.accept||'').includes('application/x-ndjson');
       if(streaming)res.writeHead(200,{'Content-Type':'application/x-ndjson','Cache-Control':'no-store'});
       const emit=event=>{if(streaming&&!res.destroyed)res.write(JSON.stringify(event)+'\n');};
@@ -1364,6 +1449,24 @@ if (require.main === module) {
           d.xhs.hot.slice(0, 12).map((x) => x.word + '(' + x.hot + ')').join(' / '));
         console.log('  话题补充热词 ' + d.xhs.extra.length + ' 个：' +
           d.xhs.extra.slice(0, 10).map((x) => x.word).join(' / '));
+        console.log('');
+        console.log('【抖音 · 综合排序常青样本】' + d.general.total_works + ' 条（近一年内，不计入「当下」）' +
+          (d.general.error ? '（' + d.general.error + '）' : ''));
+        d.general.works.forEach((w) => {
+          console.log('  「' + w.keyword + '」' + w.count + ' 条' + (w.error ? '（' + w.error + '）' : ''));
+          w.items.slice(0, 2).forEach((x) =>
+            console.log('     · 赞' + x.like + ' | ' + String(x.publish || '').slice(0, 10) + ' | ' +
+              x.title.slice(0, 34)));
+        });
+        console.log('');
+        console.log('【小红书 · 当期全站最热（跨品类）】' + d.xhs.trend.length + ' 条' +
+          (d.xhs.trend_total ? '（区间总数 ' + d.xhs.trend_total + '）' : '') +
+          (d.xhs.trend_error ? '（' + d.xhs.trend_error + '）' : ''));
+        d.xhs.trend.slice(0, 5).forEach((x) =>
+          console.log('     · 赞' + x.like + ' | ' + String(x.publish || '').slice(0, 10) + ' | ' +
+            x.title.slice(0, 34)));
+        console.log('');
+        console.log('剔除（超出时效窗口）：' + JSON.stringify(d.dropped));
         console.log(d.ok ? '\n红狐 MCP 链路正常。' : '\n红狐 MCP 链路异常：' + d.error);
         process.exit(d.ok ? 0 : 1);
       })
@@ -1403,4 +1506,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { collectTrend, douyinHot, probeSources, collectRedfox, redfoxSearch, mcpOpen, mcpCall, distillTopicHotwords, server };
+module.exports = { collectTrend, douyinHot, probeSources, collectRedfox, redfoxSearch, mcpOpen, mcpCall, distillTopicHotwords, xhsSiteTrendMcp, seasonQueries, server };

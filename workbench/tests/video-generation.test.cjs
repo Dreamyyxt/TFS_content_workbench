@@ -22,3 +22,21 @@ test('Volc request includes script and selected params; key stays out of errors'
 try{const client=createVolcClient({keyFile,fetchImpl:async(url,options)=>{payload=JSON.parse(options.body);return new Response(JSON.stringify({id:'cgt-1'}),{status:200});}});assert.equal(await client.submit({...params,assets:[],instructions:'自然光'},dir),'cgt-1');assert.equal(payload.duration,5);assert.equal(payload.ratio,'9:16');assert.match(payload.content[0].text,/微距作品展示/);
 const bad=createVolcClient({keyFile,fetchImpl:async()=>new Response(JSON.stringify({error:{message:'secret-for-test rejected'}}),{status:401})});const state=await bad.capabilities();assert.equal(state.ready,false);assert.ok(!state.error.includes('secret-for-test'));
 }finally{fs.rmSync(dir,{recursive:true,force:true});}});
+test('page-pasted Volc key wins over the local key file and never leaks',async()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'volc-page-'));const keyFile=path.join(dir,'volc.key');const seen=[];
+const mk=(opts={})=>createVolcClient({keyFile,fetchImpl:async(url,options)=>{seen.push(options.headers.Authorization);return new Response(JSON.stringify({data:[]}),{status:200});},...opts});
+try{
+/* 1) 页面没配、本机也没文件 → 提示去页面粘贴，而不是让人去翻 key 文件 */
+const none=mk();assert.equal(none.keySource(),'none');assert.equal(none.hasKey(),false);
+const st=await none.capabilities();assert.equal(st.ready,false);assert.match(st.error,/🔑 密钥/);
+/* 2) 只有本机 key 文件 → 沿用老用法 */
+fs.writeFileSync(keyFile,'file-key');const fromFile=mk();assert.equal(fromFile.keySource(),'file');
+assert.equal((await fromFile.capabilities()).source,'file');assert.equal(seen.at(-1),'Bearer file-key');
+/* 3) 页面粘贴后优先用页面的（不落盘） */
+fromFile.setKey('page-key-1234567890');assert.equal(fromFile.keySource(),'page');
+const st3=await fromFile.capabilities();assert.equal(st3.ready,true);assert.equal(st3.source,'page');assert.equal(seen.at(-1),'Bearer page-key-1234567890');
+/* 4) 清空页面密钥 → 回落到本机 key 文件 */
+fromFile.setKey('');assert.equal(fromFile.keySource(),'file');
+/* 5) 页面来源的密钥同样不进错误信息 */
+const st5=await createVolcClient({keyFile,fetchImpl:async()=>new Response(JSON.stringify({error:{message:'page-key-1234567890 rejected'}}),{status:401}),runtimeKey:'page-key-1234567890'}).capabilities();
+assert.equal(st5.ready,false);assert.equal(st5.source,'page');assert.ok(!st5.error.includes('page-key-1234567890'));
+}finally{fs.rmSync(dir,{recursive:true,force:true});}});

@@ -375,10 +375,10 @@ button,input,select{font:inherit;color:inherit}
   max-height:88vh;display:flex;flex-direction:column;box-shadow:var(--shadow-lg);overflow:hidden;
   animation:fade .2s ease;
 }
-.modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;
+.modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
   padding:14px 18px;border-bottom:1px solid var(--line)}
-.modal-head h3{font-size:16px}
-.modal-actions{display:flex;gap:7px}
+.modal-head h3{font-size:16px;flex:1 1 auto;min-width:0}
+.modal-actions{display:flex;gap:7px;flex:none;flex-wrap:wrap;margin-left:auto}
 .modal-body{padding:18px;overflow:auto}
 
 /* ---------- Toast ---------- */
@@ -751,6 +751,11 @@ button,input,select{font:inherit;color:inherit}
 #view-video textarea:focus{outline:2px solid var(--brand-soft);border-color:var(--brand);background:var(--surface)}
 .video-import{cursor:pointer}.video-import:focus-within{outline:2px solid var(--brand);outline-offset:3px}
 .video-advanced{margin-top:16px;font-size:13px;color:var(--ink-2)}.video-advanced summary{cursor:pointer;padding:8px 0}.video-advanced .fld{margin:10px 0}
+.video-guide{margin-top:14px;font-size:13px;color:var(--ink-2)}.video-guide summary{cursor:pointer;padding:8px 0;font-weight:500}
+.video-guide code{background:var(--line-2);padding:1px 4px;border-radius:4px;font-size:12px}
+.video-guide .panel-actions{margin:10px 0 0}
+.video-guide-code{margin:10px 0 0;background:var(--surface-2);border:1px solid var(--line-2);border-radius:6px;padding:12px;overflow-x:auto}
+.video-guide-code code{display:block;background:none;padding:0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.6;color:var(--ink);white-space:pre}
 .video-upload{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;border:1px dashed #c8b5a7;border-radius:var(--radius-sm);padding:26px 12px;background:var(--surface-2);cursor:pointer;margin-top:16px;text-align:center}
 .video-upload svg{width:25px;height:25px;color:var(--brand)}.video-upload strong{font-size:14px;font-weight:500}.video-upload>span{font-size:12px;color:var(--ink-2)}
 .video-upload:hover,.video-upload.is-dragging{background:var(--brand-soft);border-color:var(--brand)}.video-upload:focus-visible,.video-upload:focus-within{outline:2px solid var(--brand);outline-offset:3px}
@@ -780,14 +785,24 @@ button,input,select{font:inherit;color:inherit}
 .video-progress{margin-top:12px}.video-progress ol{display:flex;list-style:none;margin:0;padding:0;gap:8px;flex-wrap:wrap}.video-progress li{font-size:12px;color:var(--ink-2);padding:4px 9px;border:1px solid var(--line);border-radius:6px}.video-progress li.is-complete{color:var(--ok);background:var(--ok-soft);border-color:transparent}.video-progress li.is-current{color:var(--brand-ink);background:var(--brand-soft);border-color:transparent;font-weight:600}.video-progress-detail{font-size:13px;color:var(--ink-2);margin:8px 0 3px}.video-prompt-meta{font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere;margin-top:10px}.video-prompt{white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto;background:var(--surface-2);border:1px solid var(--line);padding:12px;border-radius:var(--radius-sm);font-family:inherit;font-size:13px;line-height:1.8;margin:10px 0}#jyPollingStatus{margin-top:8px}
 .account-rule{border-top:1px solid var(--line-2);padding:14px 0}.account-rule:first-child{margin-top:12px}.account-rule summary{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;list-style:revert;font-size:14px}.account-rule summary span{font-size:12px;color:var(--ink-2)}.account-rule .form-actions{justify-content:space-between}.account-rule input[readonly]{color:var(--ink-2);background:var(--line-2)}#accountSettingsStatus{margin-top:12px;color:var(--ink-2)}#accountRetired{margin-top:16px;font-size:13px;color:var(--ink-2)}#accountRetired summary{cursor:pointer}.account-retired-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line-2)}@media(max-width:600px){.account-rule summary{align-items:start;flex-direction:column;gap:3px}.account-rule .form-actions{align-items:start;flex-direction:column}}
 
-/* ===== 数据源弹窗（登录 + 红狐密钥） ===== */
+/* ===== 密钥弹窗（① 数据源 / ② 视频制作）===== */
+/* 注意：这里的 .modal-card 必须限定在 .modal-mask 内。
+   全文还有一个 #modal（查看完整脚本）也用 .modal-card，但它属于 .modal 体系、
+   宽度要 min(880px,100%)；不限定作用域会把它一起锁成 520px 的窄卡。 */
 .modal-mask{position:fixed;inset:0;background:rgba(35,31,29,.42);display:flex;align-items:center;justify-content:center;padding:24px;z-index:80}
 .modal-mask[hidden]{display:none}
-.modal-card{width:100%;max-width:520px;max-height:86vh;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-lg);padding:18px 20px 20px}
-.modal-card .panel-head{align-items:flex-start;margin-bottom:10px}
-.modal-card h3{font-size:15px;font-weight:600;margin:0 0 2px}
+.modal-mask .modal-card{width:100%;max-width:520px;max-height:86vh;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow-lg);padding:18px 20px 20px}
+.modal-mask .modal-card .panel-head{align-items:flex-start;margin-bottom:10px}
+.modal-mask .modal-card h3{font-size:15px;font-weight:600;margin:0 0 2px}
 .field-row{display:flex;gap:8px;margin:10px 0;flex-wrap:wrap}
 .field-row input{flex:1 1 150px;min-width:0;padding:9px 11px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-2);color:var(--ink);font-size:13px}
 .field-row input:focus{outline:none;border-color:var(--brand);background:var(--surface)}
 .field-err{margin:2px 0 6px;font-size:12px;color:var(--danger)}
-.modal-card code{background:var(--line-2);padding:1px 4px;border-radius:4px;font-size:12px}
+.modal-mask .modal-card code{background:var(--line-2);padding:1px 4px;border-radius:4px;font-size:12px}
+/* 密钥弹窗：分段（① 数据源 / ② 视频制作） */
+.key-section{margin-top:16px;padding-top:14px;border-top:1px dashed var(--line)}
+.key-section:first-of-type{margin-top:4px;padding-top:0;border-top:0}
+.key-title{font-size:13.5px;font-weight:600;color:var(--ink);margin:0 0 2px}
+.key-section .field-row{margin:8px 0 0}
+.key-section .panel-actions{margin-top:10px;gap:7px}
+.key-section .hint{margin-top:6px}
