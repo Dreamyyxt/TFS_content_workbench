@@ -6,7 +6,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "check": "node server.js --check"
+    "check": "node server.js --check",
+    "jianying": "node start-jianying.cjs",
+    "test": "node --test tests/*.test.cjs"
   },
   "engines": {
     "node": ">=18"

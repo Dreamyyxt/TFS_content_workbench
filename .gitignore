@@ -1,0 +1,8 @@
+.DS_Store
+.video-data/
+__pycache__/
+*.pyc
+outputs/video-p0-acceptance/
+outputs/jianying-skill-check/
+
+.jianying-data/

@@ -22,7 +22,8 @@
  *
  * ── 专业数据源（可选，未配密钥时自动跳过）─────────────────────────────────
  *   抖音垂类实时：guaikei 接口，环境变量 GUAIKEI_API_TOKEN
- *   小红书爆款笔记：红狐数据接口，环境变量 REDFOX_API_KEY
+ *   抖音 / 小红书站内爆款：红狐官方 MCP（mcp.redfox.hk），环境变量 REDFOX_API_KEY
+ *     抖音 → redfox-douyin-mcp，小红书 → redfox-xiaohongshu-mcp
  *   两者都是纯 HTTP、零依赖，配了密钥就自动并入本次采集。
  *
  * 启动： node server.js        （监听 $PORT，默认 3000，绑定 0.0.0.0）
@@ -39,6 +40,14 @@ const zlib = require('zlib');
 const { URL } = require('url');
 
 const ROOT = __dirname;
+const TrendPolicy=require('./trend-policy');
+const redfoxCache=TrendPolicy.createCache();
+const crypto=require('node:crypto');
+const JY_LOCAL = process.env.JY_LOCAL === '1';
+const jianyingAPI = JY_LOCAL ? require('./jianying-api').createJianyingAPI({
+  dir: process.env.JY_DATA_DIR || path.join(ROOT, '../.jianying-data'),
+  userToken: process.env.JY_USER_TOKEN, workerToken: process.env.JY_WORKER_TOKEN, local:true, volc: require('./volc-video').createVolcClient()
+}) : null;
 const PORT = Number(process.env.PORT || 3000);
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
            '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -73,6 +82,28 @@ const QUERY_PLAN = [
    ② 云端沙箱里 360 / 百度 会被反爬挡（返回验证码页），常常只剩必应应答；必应又忽略 site: 限定。
       所以词要铺到 9 组、覆盖面拉开，否则只靠一个引擎会翻车。
    ③ win 只是发给引擎的时间参数，最终以本地解析出的真实发布日期为准（见 judge()）。 */
+
+/* 时令注入：按当天日期推导节日 / 季节，补进搜索引擎词表。
+   解决的是「紧跟时事」——上面那组固定词永远不知道马上到万圣节还是双11。
+   只收公历固定日期；农历节日（春节 / 七夕 / 中秋）每年日子都变，不自动推导。 */
+function seasonQueries() {
+  let s = null;
+  try { s = TrendPolicy.seasons(); } catch (e) { return []; }
+  const out = [], seen = new Set();
+  const push = (q, plat, tag) => {
+    if (!q || seen.has(q)) return;
+    seen.add(q);
+    out.push({ q, win: 14, plat, tag });
+  };
+  for (const a of (s.active || [])) {
+    if (a.name === s.season) push(s.season + '美甲 ' + NOW_YEAR, '时令', '时令 · ' + s.season);
+    else push(a.name + ' 美甲 ' + NOW_YEAR, '时令', '时令 · ' + a.name);
+  }
+  for (const u of (s.upcoming || []).slice(0, 2)) {
+    push(u.name + ' 美甲 ' + NOW_YEAR, '临近', '临近 · ' + u.name + '（' + u.days + '天后）');
+  }
+  return out.slice(0, 3);
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -125,8 +156,9 @@ function httpRequest(url, opts, depth) {
         rejectUnauthorized: false,
       },
       (res) => {
-        // 跟随跳转
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && depth < 5) {
+        // 跟随跳转（raw 模式不跟随：调用方自己要看状态码与响应头）
+        if (!opts.raw && res.statusCode >= 300 && res.statusCode < 400 &&
+            res.headers.location && depth < 5) {
           res.resume();
           const next = new URL(res.headers.location, url).toString();
           return resolve(httpRequest(next, opts, depth + 1));
@@ -140,6 +172,14 @@ function httpRequest(url, opts, depth) {
         stream.on('data', (c) => chunks.push(c));
         stream.on('end', () => {
           const buf = Buffer.concat(chunks);
+          // raw 模式：把状态码与响应头一并交给调用方（MCP 要从头里读 Mcp-Session-Id）
+          if (opts.raw) {
+            return resolve({
+              status: res.statusCode,
+              headers: res.headers,
+              body: buf.toString('utf8'),
+            });
+          }
           if (res.statusCode >= 400) {
             return reject(new Error('HTTP ' + res.statusCode));
           }
@@ -603,6 +643,433 @@ async function proXhs() {
 }
 
 /* =========================================================================
+   五之二、红狐数据（走红狐官方 MCP）
+   —— 抖音走 redfox-douyin-mcp，小红书走 redfox-xiaohongshu-mcp。
+      用**远程 HTTP 模式**（https://mcp.redfox.hk/{platform}/mcp），
+      这样已发布到线上的工作台也能直接调用，无需在本机跑任何进程。
+   —— 拿到的是平台站内真实互动数据（点赞 / 收藏 / 评论 / 分享）与作品直链，
+      与官方热榜 / 搜索引擎完全不同。
+   ⚠️ 密钥由调用方随请求传入（请求头 x-redfox-key），服务端**只做转发**：
+      不写磁盘、不落库、不写进日志。密钥存在哪里由前端决定。
+   ========================================================================= */
+const REDFOX_ORIGIN = 'https://redfox.hk';
+const REDFOX_SRC_SEARCH = '抖音作品查询-WorkBuddy';
+
+/* 采集范围：美甲聚焦（用户选定）。每词取 MCP 优质库单页（20 条）高赞作品。 */
+const REDFOX_KEYWORDS = ['美甲', '裸色美甲', '显白美甲', '猫眼美甲', '穿戴甲', '美睫'];
+
+/* 旧 REST 接口的业务错误码判断（仅抖音兜底通道还在用） */
+function redfoxCode(j, what) {
+  if (j && j.code != null && Number(j.code) !== 2000) {
+    const msg = String((j && j.msg) || '').slice(0, 60);
+    throw new Error('红狐' + what + ' code=' + j.code + (msg ? ' ' + msg : ''));
+  }
+}
+
+/* 错误信息压缩成一句话，便于放进 JSON 返回给前端 */
+const shortErr = (e, n) => String((e && e.message) || e || '').replace(/\s+/g, ' ').slice(0, n || 90);
+
+/* ---- 红狐 MCP 客户端（JSON-RPC over Streamable HTTP） --------------------
+   流程：initialize 拿 Mcp-Session-Id → 后续 tools/call 带上该头。
+   会话只在「一次采集」内复用，采集完即弃（不跨请求缓存，避免多用户串号）。 */
+const MCP_HOST = 'mcp.redfox.hk';
+const MCP_PROTOCOL = '2025-06-18';
+let mcpSeq = 0;
+
+/* 一次 JSON-RPC 往返：返回 { status, sid, json }。401/403 直接翻译成「密钥无效」。 */
+async function mcpRpc(platform, key, payload, sid, timeout) {
+  const r = await httpRequest('https://' + MCP_HOST + '/' + platform + '/mcp', {
+    method: 'POST',
+    raw: true,
+    body: JSON.stringify(payload),
+    timeout: timeout || 45000,
+    headers: Object.assign(
+      {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+        REDFOX_API_KEY: key,
+      },
+      sid ? { 'Mcp-Session-Id': sid } : null
+    ),
+  });
+  if (r.status === 401 || r.status === 403) {
+    throw new Error('红狐密钥无效或已过期（HTTP ' + r.status + '）');
+  }
+  // Streamable HTTP 可能用 SSE 回包：正文里取最后一条 data: 行
+  const body = String(r.body || '');
+  const dataLines = body.split(/\r?\n/).filter((l) => l.startsWith('data:'));
+  const payloadText = dataLines.length ? dataLines[dataLines.length - 1].slice(5).trim() : body;
+  let json = null;
+  try { json = JSON.parse(payloadText); } catch (e) { json = null; }
+  return { status: r.status, sid: (r.headers && r.headers['mcp-session-id']) || '', json };
+}
+
+/* 开一个 MCP 会话，返回会话 id（服务端不给则为空串）。 */
+async function mcpOpen(platform, key) {
+  const a = await mcpRpc(platform, key, {
+    jsonrpc: '2.0', id: ++mcpSeq, method: 'initialize',
+    params: {
+      protocolVersion: MCP_PROTOCOL,
+      capabilities: {},
+      clientInfo: { name: 'WorkBuddy-Workbench', version: '1.0' },
+    },
+  }, '', 25000);
+  if (!a.json || !a.json.result) {
+    const msg = (a.json && a.json.error && a.json.error.message) || ('HTTP ' + a.status);
+    throw new Error('红狐 MCP(' + platform + ') 握手失败：' + String(msg).slice(0, 70));
+  }
+  const sid = a.sid || '';
+  if (sid) {
+    // 规范要求补一个 initialized 通知；失败不影响后续调用
+    await mcpRpc(platform, key, { jsonrpc: '2.0', method: 'notifications/initialized' }, sid, 15000)
+      .catch(() => {});
+  }
+  return sid;
+}
+
+/* 调一个 MCP 工具，返回其业务 JSON（红狐把数据放在 content[0].text 里）。 */
+async function mcpCall(platform, key, sid, tool, args, timeout) {
+  const r = await mcpRpc(platform, key, {
+    jsonrpc: '2.0', id: ++mcpSeq, method: 'tools/call',
+    params: { name: tool, arguments: args || {} },
+  }, sid, timeout);
+  if (!r.json) throw new Error('红狐 MCP 返回非 JSON（HTTP ' + r.status + '）');
+  if (r.json.error) {
+    throw new Error(String(r.json.error.message || JSON.stringify(r.json.error)).slice(0, 120));
+  }
+  const res = r.json.result || {};
+  const text = Array.isArray(res.content)
+    ? res.content.map((x) => (x && x.text) || '').join('\n')
+    : '';
+  if (res.isError) {
+    throw new Error(String(text).replace(/\s+/g, ' ').slice(0, 140) || ('工具 ' + tool + ' 执行失败'));
+  }
+  let obj = null;
+  try { obj = JSON.parse(text); } catch (e) { obj = null; }
+  if (!obj) throw new Error('工具 ' + tool + ' 返回内容无法解析');
+  // 红狐把业务错误包在 { error: {...} } 里（HTTP 仍是 200）
+  if (obj.error) {
+    const m = obj.error.message || obj.error;
+    throw new Error('红狐接口报错：' + String(m).replace(/\s+/g, ' ').slice(0, 120));
+  }
+  return obj;
+}
+
+/* 会话可能被服务端中途回收（报 Session not found）。此时自动重开会话并重试一次。
+   sess 是可变对象 { sid }，重开后会把新会话 id 写回去供后续调用复用。 */
+async function mcpCallSafe(platform, key, sess, tool, args, timeout) {
+  try {
+    return await mcpCall(platform, key, sess.sid, tool, args, timeout);
+  } catch (e) {
+    const msg = String((e && e.message) || e);
+    if (!/session/i.test(msg)) throw e;
+    sess.sid = await mcpOpen(platform, key);
+    return await mcpCall(platform, key, sess.sid, tool, args, timeout);
+  }
+}
+
+/* 从抖音爆款作品里「提炼」热词 —— 作品标题中带 # 的话题标签，按点赞量加权。
+   为什么不用平台热词榜：MCP 的榜单类工具当前在红狐服务端有故障；而且从美甲类
+   爆款里长出来的词，比全站泛热词榜更对口。小红书笔记的话题标签同样适用。 */
+function distillTopicHotwords(works) {
+  const score = new Map();
+  const cnt = new Map();
+  for (const w of works) {
+    const text = String(w.title || '') + ' ' + String(w.desc || '');
+    const tags = text.match(/#[^#\s，。,、！!？?【】()（）]{2,16}/g) || [];
+    if (!tags.length) continue;
+    // 单条作品权重取点赞对数，避免一条千万赞的泛娱乐作品压死全部垂直内容
+    const weight = 1 + Math.log10((Number(w.like) || 0) + 10);
+    const seen = new Set();
+    for (const t of tags) {
+      const word = t.slice(1).trim();
+      if (!word || seen.has(word)) continue;
+      seen.add(word);
+      score.set(word, (score.get(word) || 0) + weight);
+      cnt.set(word, (cnt.get(word) || 0) + 1);
+    }
+  }
+  return [...score.entries()]
+    .map(([word, s]) => ({
+      word,
+      hot: Math.round(s * 10) / 10,
+      works: cnt.get(word) || 0,
+      related: HOT_RELEVANT_RE.test(word),
+    }))
+    .sort((a, b) => b.hot - a.hot || b.works - a.works)
+    .slice(0, 40);
+}
+
+/* ---- 抖音：关键词搜站内爆款作品（redfox-douyin-mcp） ----
+   sort_type：'2' = 按发布时间（最新）；不传 = 综合（相关性排序，
+   实测会把几个月前的历史爆款混进来）。要「当下」就必须传 '2'，
+   否则近 7 天过滤后一条都留不下。不传（综合）留给「常青」通道用。 */
+async function dySearchWorksMcp(key, sess, keyword, sortType) {
+  const args = { keyword, offset: 0 };
+  if (sortType) args.sort_type = String(sortType);
+  const j = await mcpCallSafe('douyin', key, sess, 'douyin_search_articles', args, 30000);
+  const list = Array.isArray(j.list) ? j.list : [];
+  return list.map((x) => ({
+    title: String(x.title || x.content || '').trim().slice(0, 160),
+    author: String(x.accountName || '').trim(),
+    fans: Number(x.followerCount) || 0,
+    like: Number(x.likeCount) || 0,
+    collect: Number(x.collectCount) || 0,
+    comment: Number(x.commentCount) || 0,
+    share: Number(x.shareCount) || 0,
+    url: String(x.workUrl || ''),
+    publish: String(x.publishTime || ''),
+    type: String(x.workType || ''),
+  })).filter((x) => x.title || x.url)
+    .sort((a, b) => b.like - a.like || b.collect - a.collect);
+}
+
+/* ---- 小红书：关键词搜站内爆款笔记（redfox-xiaohongshu-mcp） ---- */
+/* 两个接口字段名不同（search_articles 用 workXxx，hot_notes 用 xxxCount），统一映射。 */
+function mapXhsWork(x) {
+  const num = (a, b) => Number(x[a] != null ? x[a] : x[b]) || 0;
+  return {
+    title: String(x.workTitle || x.title || '').trim().slice(0, 160),
+    author: String(x.accountNickname || x.authorNickname || '').trim(),
+    fans: Number(x.authorFans) || 0,
+    like: num('workLikedCount', 'likedCount'),
+    collect: num('workCollectedCount', 'collectedCount'),
+    comment: num('workCommentsCount', 'commentsCount'),
+    share: num('workSharedCount', 'sharedCount'),
+    url: String(x.workUrl || x.shareInfoLink || ''),
+    publish: String(x.workPublishTime || x.createTime || ''),
+    desc: String(x.workDesc || x.desc || ''),
+    type: String(x.workType || ''),
+  };
+}
+
+/* sort_type 同抖音：'2' = 按发布时间（最新），不传 = 综合。 */
+async function xhsSearchWorksMcp(key, sess, keyword, sortType) {
+  const args = { keyword, offset: 0 };
+  if (sortType) args.sort_type = String(sortType);
+  const j = await mcpCallSafe('xiaohongshu', key, sess, 'xiaohongshu_search_articles', args, 30000);
+  const list = Array.isArray(j.list) ? j.list : [];
+  return list.map(mapXhsWork).filter((x) => x.title || x.url)
+    .sort((a, b) => b.like - a.like || b.collect - a.collect);
+}
+
+/* 小红书爆款洞察：平台直接给出「关联搜索词 + 对应笔记数」，这是最准的小红书热词源。 */
+async function xhsHotwordsMcp(key, sess, keyword) {
+  const j = await mcpCallSafe('xiaohongshu', key, sess, 'xiaohongshu_search_hot_notes',
+    { keyword }, 45000);
+  const rel = Array.isArray(j.relatedSearches) ? j.relatedSearches : [];
+  const arts = Array.isArray(j.articles) ? j.articles : [];
+  const words = rel.map((x) => ({
+    word: String(x.keyword || '').trim(),
+    hot: Number(x.articleCount) || 0,
+    related: HOT_RELEVANT_RE.test(String(x.keyword || '')),
+  })).filter((x) => x.word);
+
+  // 再从这些笔记的话题标签里补一批词（与官方关联词合并去重）
+  const seen = new Set(words.map((w) => w.word));
+  const extra = [];
+  for (const w of distillTopicHotwords(arts.map(mapXhsWork))) {
+    if (!seen.has(w.word)) { seen.add(w.word); extra.push(w); }
+  }
+  return {
+    words: words.sort((a, b) => b.hot - a.hot).slice(0, 30),
+    extra: extra.slice(0, 20),
+    articles: arts.map(mapXhsWork),
+    total: Number(j.total) || 0,
+  };
+}
+
+/* 小红书「当期全站最热」：**不传关键词**、只给日期区间，返回平台当期最热的笔记（跨品类）。
+   用途是补「节日 / 时事」维度 —— 回答「此刻全站在火什么」，这是按美甲词搜不出来的。
+   （红狐的榜单类工具实测全不可用：抖音 3 个榜单返回空、小红书日榜服务端报错、
+     黑马榜对美甲类词返回「查询结果为空」。这个接口是唯一还通的「当下」信号。） */
+async function xhsSiteTrendMcp(key, sess, days) {
+  const end = new Date();
+  const start = new Date(end.getTime() - (Number(days) || 7) * 86400000);
+  const j = await mcpCallSafe('xiaohongshu', key, sess, 'xiaohongshu_search_hot_notes',
+    { start_date: fmtDate(start), end_date: fmtDate(end), page_num: 1, page_size: 30 }, 45000);
+  const arts = Array.isArray(j.articles) ? j.articles : [];
+  return { items: arts.map(mapXhsWork), total: Number(j.total) || 0 };
+}
+
+async function redfoxSearch(key, keyword, days) {
+  const end = new Date();
+  const start = new Date(end.getTime() - (Number(days) || 7) * 86400000);
+  const body = JSON.stringify({
+    keyword,
+    source: REDFOX_SRC_SEARCH,
+    pageNum: 1,
+    pageSize: 50,
+    startDate: fmtDate(start),
+    endDate: fmtDate(end),
+  });
+  const txt = await httpGet(REDFOX_ORIGIN + '/story/api/dy/data/searchWork', {
+    method: 'POST',
+    body,
+    timeout: 25000,
+    headers: { REDFOX_API_KEY: key, 'User-Agent': 'QoderWork/1.0' },
+  });
+  const j = JSON.parse(txt);
+  redfoxCode(j, '搜索');
+  const list = ((j && j.data) || {}).list || [];
+  return list.map((x) => ({
+    title: String(x.content || '').trim().slice(0, 160),
+    author: String(x.authorName || '').trim(),
+    like: Number(x.likeCount) || 0,
+    collect: Number(x.collectCount) || 0,
+    comment: Number(x.commentCount) || 0,
+    share: Number(x.shareCount) || 0,
+    url: String(x.opusUrl || ''),
+    publish: String(x.publishTime || ''),
+  })).filter((x) => x.title || x.url)
+    // 按点赞降序，让「爆款」排在前面（与专家脚本一致）
+    .sort((a, b) => b.like - a.like || b.collect - a.collect);
+}
+
+/* 采集入口 —— 五条线并行取数，任一失败不影响其他：
+   ① 抖音 · 近 N 天「最新」爆款（sort_type='2'）
+   ② 小红书 · 近 N 天「最新」爆款（sort_type='2'）
+   ③ 抖音 ·「综合」排序常青样本（不按 N 天过滤，保留近一年）
+      —— 回答「这个赛道什么内容长期跑得动」，与 ① 的「当下」互补
+   ④ 小红书 · 当期全站最热（无关键词 + 日期区间）—— 跨品类的「当下氛围」
+   ⑤ 小红书 · 平台关联搜索词
+   串行 + 轻微间隔以降低被限流概率。返回结构里**不含任何密钥信息**。
+   抖音 MCP 整体不可用时退回旧 REST 接口（多一重保障，能力不打折）。 */
+async function collectRedfox(key, opts, progress = () => {}) {
+  opts = opts || {};
+  const keywords = (Array.isArray(opts.keywords) && opts.keywords.length ? opts.keywords : REDFOX_KEYWORDS)
+    .map((k) => String(k || '').trim().slice(0,40)).filter(Boolean).slice(0, 24);
+  const days = Math.min(30, Math.max(1, Number(opts.days) || 7));
+  const dropped={old:0,unknown:0,future:0};
+  function recent(items){const r=TrendPolicy.filter(items,days);for(const k of Object.keys(dropped))dropped[k]+=r[k];return r.items;}
+  /* 常青通道用它：只挡掉一年以上的，不按 N 天过滤 —— 那里的「旧」正是我们要的东西，
+     所以也不计进 dropped（dropped 的语义是「被时效窗口剔除的」）。 */
+  function withinYear(items){return TrendPolicy.filter(items,365).items;}
+  const out = {
+    ok: true, source: 'mcp', fetched_at: new Date().toISOString(), days, keywords,
+    hot: [], hot_error: '',            // 抖音热词（从站内爆款的话题标签提炼）
+    works: [], total_works: 0,         // 抖音站内爆款作品（近 N 天、按最新排序）
+    general: { works: [], total_works: 0, error: '' },   // 抖音综合排序常青样本
+    dy_channel: 'mcp',                 // 抖音实际通道：mcp / rest
+    dy_error: '',
+    xhs: { hot: [], extra: [], works: [], total_works: 0, total: 0, trend: [], trend_total: 0, trend_error: '', error: '', hot_error: '' },
+    error: '',
+  };
+
+  /* —— 抖音：redfox-douyin-mcp —— */
+  try {
+    const dySess = { sid: await mcpOpen('douyin', key) };
+    for (const kw of keywords) {
+      try {
+        progress({platform:"抖音",keyword:kw,stage:"最新"});
+        let raw;try{raw=await dySearchWorksMcp(key, dySess, kw, '2');}catch(e){raw=await redfoxSearch(key,kw,days);out.dy_channel="rest";}
+        const items = recent(raw);
+        out.works.push({ keyword: kw, count: items.length, items });
+      } catch (e) {
+        out.works.push({ keyword: kw, count: 0, items: [], error: shortErr(e) });
+      }
+      await sleep(150);
+    }
+  } catch (e) {
+    // 握手就失败（网关故障 / 密钥问题）→ 退回 REST 作品搜索
+    out.dy_channel = 'rest';
+    out.dy_error = shortErr(e);
+    out.hot_error = shortErr(e);
+    out.works = [];
+    for (const kw of keywords) {
+      try {
+        progress({platform:"抖音",keyword:kw,stage:"备用搜索"});
+        const items = recent(await redfoxSearch(key, kw, days));
+        out.works.push({ keyword: kw, count: items.length, items });
+      } catch (e2) {
+        out.works.push({ keyword: kw, count: 0, items: [], error: shortErr(e2) });
+      }
+      await sleep(200);
+    }
+    if (out.works.some((w) => w.count)) { out.dy_error = ''; out.hot_error = ''; }
+  }
+
+  out.total_works = out.works.reduce((n, w) => n + w.count, 0);
+
+  /* —— 抖音「综合」常青样本：只取前 2 个关键词，控制调用量。
+        刻意**不**按近 N 天过滤：综合排序返回的多是历史高互动内容，
+        那正是「长期跑得动」的参考，一过滤就什么都不剩。 —— */
+  try {
+    const gSess = { sid: await mcpOpen('douyin', key) };
+    for (const kw of keywords.slice(0, 2)) {
+      try {
+        progress({platform:'抖音',keyword:kw,stage:'常青参考'});
+        const items = withinYear(await dySearchWorksMcp(key, gSess, kw));
+        out.general.works.push({ keyword: kw, count: items.length, items });
+      } catch (e) {
+        out.general.works.push({ keyword: kw, count: 0, items: [], error: shortErr(e) });
+      }
+      await sleep(150);
+    }
+  } catch (e) {
+    out.general.error = shortErr(e);
+  }
+  out.general.total_works = out.general.works.reduce((n, w) => n + w.count, 0);
+
+  const dyFlat = [];
+  out.works.forEach((w) => (w.items || []).forEach((it) => dyFlat.push(it)));
+  out.hot = distillTopicHotwords([...new Map(dyFlat.map(w=>[w.url||w.title,w])).values()]);
+
+  /* —— 小红书：redfox-xiaohongshu-mcp —— */
+  try {
+    const xhsSess = { sid: await mcpOpen('xiaohongshu', key) };
+    for (const kw of keywords) {
+      try {
+        progress({platform:"小红书",keyword:kw,stage:"最新"});
+        const items = recent(await xhsSearchWorksMcp(key, xhsSess, kw, '2'));
+        out.xhs.works.push({ keyword: kw, count: items.length, items });
+      } catch (e) {
+        out.xhs.works.push({ keyword: kw, count: 0, items: [], error: shortErr(e) });
+      }
+      await sleep(150);
+    }
+    out.xhs.total_works = out.xhs.works.reduce((n, w) => n + w.count, 0);
+    // 热词洞察：拉一次平台关联词（最准的一手热词）
+    try {
+      progress({platform:'小红书',keyword:keywords[0]||'美甲',stage:'关联词'});
+      const hw = await xhsHotwordsMcp(key, xhsSess, keywords[0] || '美甲');
+      out.xhs.hot = hw.words;
+      out.xhs.extra = hw.extra;
+      out.xhs.total = hw.total;
+    } catch (e) {
+      out.xhs.hot_error = shortErr(e);
+      const flat = [];
+      out.xhs.works.forEach((w) => (w.items || []).forEach((it) => flat.push(it)));
+      out.xhs.extra = distillTopicHotwords(flat).slice(0, 20);
+    }
+    /* 当期全站最热（跨品类）—— 补「节日 / 时事」维度，只 1 次调用 */
+    try {
+      progress({platform:'小红书',keyword:'全站热榜',stage:'当期最热'});
+      const tr = await xhsSiteTrendMcp(key, xhsSess, days);
+      out.xhs.trend = tr.items.slice(0, 20);
+      out.xhs.trend_total = tr.total;
+    } catch (e) {
+      out.xhs.trend_error = shortErr(e);
+    }
+  } catch (e) {
+    out.xhs.error = shortErr(e);
+  }
+
+  out.dropped=dropped;
+  out.warnings=[...out.works,...out.xhs.works,...out.general.works].filter(w=>w.error).map(w=>w.keyword+'：'+w.error);
+  if(out.general.error)out.warnings.push('抖音常青通道：'+out.general.error);
+  if(out.xhs.trend_error)out.warnings.push('小红书当期最热：'+out.xhs.trend_error);
+  out.platforms={douyin:{count:out.total_works,general:out.general.total_works,error:out.dy_error,status:out.works.some(w=>w.error)?'partial':out.total_works?'ok':'empty'},xiaohongshu:{count:out.xhs.total_works,trend:out.xhs.trend.length,error:out.xhs.error||out.xhs.hot_error,status:out.xhs.error?'error':out.xhs.works.some(w=>w.error)?'partial':out.xhs.total_works?'ok':'empty'}};
+  out.ok = out.total_works > 0 || out.xhs.total_works > 0 ||
+    out.hot.length > 0 || out.xhs.hot.length > 0 ||
+    out.general.total_works > 0 || out.xhs.trend.length > 0;
+  if (!out.ok) {
+    out.error = out.dy_error || out.xhs.error || out.hot_error || out.xhs.hot_error || '红狐 MCP 没有返回数据';
+  }
+  return out;
+}
+
+/* =========================================================================
    六、聚合采集
    ========================================================================= */
 
@@ -610,7 +1077,7 @@ async function collectTrend() {
   const fetchedAt = new Date();
   const [hot, search, proDy, proXhsRes] = await Promise.all([
     douyinHot(),
-    searchAll(QUERY_PLAN),
+    searchAll(QUERY_PLAN.concat(seasonQueries())),
     proDouyin(),
     proXhs(),
   ]);
@@ -785,9 +1252,46 @@ function sendJson(res, code, obj) {
   res.end(body);
 }
 
+/* 静态资源安全边界：网页真正用到的文件就这几个。
+   源码 / 配置 / 测试 / 工具 / 文档一律不对外 —— 之前 /server.js、/package.json
+   是被公网直接下载的（整个后端源码可被任何人取走），这里堵上。
+   规则：凡是「源码类扩展名」的文件，必须在白名单里才放行，否则一律 404；
+   非源码类（css / 图片 / 字体）照常提供。新增前端脚本记得加进白名单。 */
+const STATIC_FILES = new Set([
+  '/index.html',
+  '/app.js',
+  '/styles.css',
+  '/account-strategy.js',
+  '/account-settings.js',
+  '/jianying-studio.js',
+  '/secure-store.js',
+  '/trend-policy.js',
+  '/humanizer-policy.js',
+]);
+const SRC_EXT_RE = /\.(js|mjs|cjs|jsx|ts|tsx|json|md|markdown|map|txt|lock|yml|yaml|toml|env|py|sh)$/i;
+
+/* 读取请求体（带大小上限）。任何情况下都不写日志，避免密钥泄漏。 */
+function readBody(req, limit) {
+  return new Promise((resolve) => {
+    let n = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      n += c.length;
+      if (n > (limit || 65536)) { req.destroy(); return; }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', () => resolve(''));
+  });
+}
+
 function serveStatic(req, res, pathname) {
   let rel = decodeURIComponent(pathname);
   if (rel === '/' || rel === '') rel = '/index.html';
+  if (SRC_EXT_RE.test(rel) && !STATIC_FILES.has(rel)) {
+    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('404');
+  }
   const file = path.join(ROOT, path.normalize(rel).replace(/^(\.\.[/\\])+/, ''));
   if (!file.startsWith(ROOT)) {
     res.writeHead(403);
@@ -815,9 +1319,28 @@ const server = http.createServer(async (req, res) => {
     /* 忽略 */
   }
 
+  if (jianyingAPI && await jianyingAPI(req, res, new URL(req.url, 'http://localhost'))) return;
+
+  if (JY_LOCAL && pathname.startsWith('/.cloud/')) {
+    if (req.headers.origin && req.headers.origin !== 'http://' + req.headers.host) {
+      res.writeHead(403); return res.end();
+    }
+    const headers = {...req.headers, host:'nail-content-workbench.app.workbuddy.host', origin:'https://nail-content-workbench.app.workbuddy.host'};
+    delete headers.connection;
+    const upstream = https.request({hostname:'nail-content-workbench.app.workbuddy.host',path:req.url.slice('/.cloud'.length),method:req.method,headers}, response => {
+      const responseHeaders = {...response.headers};
+      delete responseHeaders['access-control-allow-origin'];
+      res.writeHead(response.statusCode, responseHeaders); response.pipe(res);
+    });
+    upstream.setTimeout(30000,()=>upstream.destroy());
+    upstream.on('error',()=>{if(!res.headersSent)res.writeHead(502);res.end();});
+    req.pipe(upstream);return;
+  }
   if (pathname === '/api/health') {
     return sendJson(res, 200, { ok: true, service: 'nail-content-workbench', time: new Date().toISOString() });
   }
+
+  if (pathname === '/api/trend/config') return sendJson(res,200,{serverConfigured:!!REDFOX_KEY});
 
   if (pathname === '/api/trend/collect') {
     try {
@@ -841,6 +1364,39 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  /* 红狐抖音数据转发。密钥来自请求头 x-redfox-key，用完即弃：不落盘、不落库、不写日志。 */
+  if (pathname === '/api/trend/redfox') {
+    if (req.method !== 'POST') {
+      return sendJson(res, 405, { ok: false, error: 'use POST' });
+    }
+    const key = String(req.headers['x-redfox-key'] || REDFOX_KEY || '').trim();
+    if (!key) {
+      return sendJson(res, 401, { ok: false, error: '缺少红狐密钥（请先在页面上配置）', need_key: true });
+    }
+    let opts = {};
+    try {
+      const raw = await readBody(req);
+      if (raw) opts = JSON.parse(raw);
+      if (typeof opts !== 'object' || opts === null) opts = {};
+    } catch (e) {
+      opts = {};
+    }
+    try {
+      const cacheKey=crypto.createHash('sha256').update(key+'\0'+JSON.stringify({v:2,keywords:opts.keywords||REDFOX_KEYWORDS,days:opts.days||7})).digest('hex');
+      const streaming=String(req.headers.accept||'').includes('application/x-ndjson');
+      if(streaming)res.writeHead(200,{'Content-Type':'application/x-ndjson','Cache-Control':'no-store'});
+      const emit=event=>{if(streaming&&!res.destroyed)res.write(JSON.stringify(event)+'\n');};
+      try{const result=await redfoxCache(cacheKey,()=>collectRedfox(key,opts,p=>emit({type:'progress',...p})));if(streaming){emit({type:'result',data:result});res.end();return;}return sendJson(res,200,result);}catch(e){if(streaming){emit({type:'result',data:{ok:false,error:'红狐采集失败'}});res.end();return;}throw e;}
+    } catch (e) {
+      return sendJson(res, 200, {
+        ok: false,
+        error: '红狐采集失败：' + String((e && e.message) || e).slice(0, 90),
+        hot: [], hot_error: '', works: [], total_works: 0,
+        fetched_at: new Date().toISOString(),
+      });
+    }
+  }
+
   if (pathname.startsWith('/api/')) {
     return sendJson(res, 404, { ok: false, error: 'unknown api' });
   }
@@ -861,6 +1417,63 @@ if (require.main === module) {
       });
       process.exit(0);
     });
+  } else if (process.argv.includes('--redfox')) {
+    const key = String(process.env.REDFOX_API_KEY || '').trim();
+    if (!key) {
+      console.error('缺少 REDFOX_API_KEY 环境变量');
+      process.exit(1);
+    }
+    collectRedfox(key, {})
+      .then((d) => {
+        console.log('通道：红狐官方 MCP（抖音实际走 ' + d.dy_channel + '）  范围：近 ' + d.days + ' 天');
+        console.log('关键词：' + d.keywords.join(' / '));
+        console.log('');
+        console.log('【抖音】站内爆款作品 ' + d.total_works + ' 条' + (d.dy_error ? '（' + d.dy_error + '）' : ''));
+        d.works.forEach((w) => {
+          console.log('  「' + w.keyword + '」' + w.count + ' 条' + (w.error ? '（' + w.error + '）' : ''));
+          w.items.slice(0, 2).forEach((x) =>
+            console.log('     · 赞' + x.like + ' 藏' + x.collect + ' 评' + x.comment +
+              ' | ' + x.title.slice(0, 34) + ' @' + x.author));
+        });
+        console.log('  提炼热词 ' + d.hot.length + ' 个：' +
+          d.hot.slice(0, 12).map((x) => x.word).join(' / '));
+        console.log('');
+        console.log('【小红书】爆款笔记 ' + d.xhs.total_works + ' 条' + (d.xhs.error ? '（' + d.xhs.error + '）' : ''));
+        d.xhs.works.forEach((w) => {
+          console.log('  「' + w.keyword + '」' + w.count + ' 条' + (w.error ? '（' + w.error + '）' : ''));
+          w.items.slice(0, 2).forEach((x) =>
+            console.log('     · 赞' + x.like + ' 藏' + x.collect + ' 评' + x.comment +
+              ' | ' + x.title.slice(0, 34) + ' @' + x.author));
+        });
+        console.log('  平台关联热词 ' + d.xhs.hot.length + ' 个：' +
+          d.xhs.hot.slice(0, 12).map((x) => x.word + '(' + x.hot + ')').join(' / '));
+        console.log('  话题补充热词 ' + d.xhs.extra.length + ' 个：' +
+          d.xhs.extra.slice(0, 10).map((x) => x.word).join(' / '));
+        console.log('');
+        console.log('【抖音 · 综合排序常青样本】' + d.general.total_works + ' 条（近一年内，不计入「当下」）' +
+          (d.general.error ? '（' + d.general.error + '）' : ''));
+        d.general.works.forEach((w) => {
+          console.log('  「' + w.keyword + '」' + w.count + ' 条' + (w.error ? '（' + w.error + '）' : ''));
+          w.items.slice(0, 2).forEach((x) =>
+            console.log('     · 赞' + x.like + ' | ' + String(x.publish || '').slice(0, 10) + ' | ' +
+              x.title.slice(0, 34)));
+        });
+        console.log('');
+        console.log('【小红书 · 当期全站最热（跨品类）】' + d.xhs.trend.length + ' 条' +
+          (d.xhs.trend_total ? '（区间总数 ' + d.xhs.trend_total + '）' : '') +
+          (d.xhs.trend_error ? '（' + d.xhs.trend_error + '）' : ''));
+        d.xhs.trend.slice(0, 5).forEach((x) =>
+          console.log('     · 赞' + x.like + ' | ' + String(x.publish || '').slice(0, 10) + ' | ' +
+            x.title.slice(0, 34)));
+        console.log('');
+        console.log('剔除（超出时效窗口）：' + JSON.stringify(d.dropped));
+        console.log(d.ok ? '\n红狐 MCP 链路正常。' : '\n红狐 MCP 链路异常：' + d.error);
+        process.exit(d.ok ? 0 : 1);
+      })
+      .catch((e) => {
+        console.error('红狐采集失败：', e && e.message);
+        process.exit(1);
+      });
   } else if (process.argv.includes('--check')) {
     collectTrend()
       .then((d) => {
@@ -887,10 +1500,10 @@ if (require.main === module) {
         process.exit(1);
       });
   } else {
-    server.listen(PORT, '0.0.0.0', () => {
+    server.listen(PORT, JY_LOCAL ? '127.0.0.1' : '0.0.0.0', () => {
       console.log('工作台已启动： http://localhost:' + PORT);
     });
   }
 }
 
-module.exports = { collectTrend, douyinHot, probeSources, server };
+module.exports = { collectTrend, douyinHot, probeSources, collectRedfox, redfoxSearch, mcpOpen, mcpCall, distillTopicHotwords, xhsSiteTrendMcp, seasonQueries, server };
