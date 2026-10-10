@@ -1,7 +1,7 @@
 (() => {
   const $=id=>document.getElementById(id),esc=value=>String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   let draft=[],saving=false;
-  const fields=[['goal','核心目标','text'],['duration','目标时长（秒，如15或10-15）','text'],['planCount','每批生成计划数量','number'],['perWeek','每周发布数量','number'],['shots','分镜数量（如3-5）','text'],['direction','内容方向与选题边界','area'],['structure','脚本结构与镜头节奏','area'],['speech','口播、声音与字幕规则','area'],['cta','收尾与引导动作','area']];
+  const fields=[['searchKeywords','风向采集关键词（逗号分隔，留空自动选择）','text'],['goal','核心目标','text'],['duration','目标时长（秒，如15或10-15）','text'],['planCount','每批生成计划数量','number'],['perWeek','每周发布数量','number'],['shots','分镜数量（如3-5）','text'],['direction','内容方向与选题边界','area'],['structure','脚本结构与镜头节奏','area'],['speech','口播、声音与字幕规则','area'],['cta','收尾与引导动作','area']];
   function render(){
     const ready=window.WorkbenchAccounts.loaded();$('accountSave').disabled=saving||!ready;$('accountAdd').disabled=saving||!ready;
     $('accountSettingsList').innerHTML=draft.filter(a=>a.enabled!==false).map(a=>'<details class="account-rule" data-account="'+esc(a.key)+'"><summary><b>'+esc(a.displayName || a.name)+'</b><span>'+esc(a.platform)+' · '+esc(a.duration.replace(/s$/,'秒'))+' · '+esc(a.goal)+'</span></summary><div class="form-grid profile-grid">'+

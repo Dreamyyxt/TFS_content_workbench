@@ -24,6 +24,7 @@
     return config.map(a=>{
       const b={...a,enabled:a.enabled!==false};
       for(const field of ['key','name','goal','direction','structure','speech','cta'])if(typeof b[field]!=='string'||!b[field].trim()||b[field].length>(['key','name','goal'].includes(field)?100:2000))throw Error('请完整填写账号名称、目标和内容/脚本规则');
+      if(b.searchKeywords!=null && (typeof b.searchKeywords!=='string'||b.searchKeywords.length>500))throw Error('采集关键词请控制在500字以内');
       if(!['抖音','小红书','双平台'].includes(b.platform))throw Error('请选择账号平台');
       for(const field of ['planCount','perWeek'])if(!Number.isInteger(b[field])||b[field]<1||b[field]>(field==='perWeek'?7:20))throw Error('计划数量需为1–20，周更数量需为1–7');
       const d=String(b.duration).match(/^(\d+)(?:-(\d+))?s?$/);

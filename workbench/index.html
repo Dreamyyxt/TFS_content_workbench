@@ -101,6 +101,9 @@
           <button class="btn btn-ghost btn-sm" id="btnTrendFold">收起</button>
           <button class="btn btn-ghost" id="btnSeed">载入趋势底稿</button>
           <button class="btn btn-ghost" id="btnAiTrend">生成新的视频计划</button>
+          <button class="btn btn-ghost" id="btnSecure" title="粘贴红狐密钥（只存在本机浏览器），实时采集风向会自动带上抖音 + 小红书站内爆款数据">
+            <span class="ico">🔑</span> 数据源
+          </button>
           <button class="btn btn-primary" id="btnRefresh">
             <span class="ico">🛰</span> 实时采集风向
           </button>
@@ -435,6 +438,38 @@
   </div>
 </div>
 
+<div class="modal-mask" id="secureModal" hidden>
+  <div class="modal-card">
+    <div class="panel-head">
+      <div>
+        <h3>数据源 · 抖音 + 小红书站内作品</h3>
+        <p class="hint" id="secureState">粘贴红狐密钥即可，无需注册登录</p>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="secureClose" type="button">关闭</button>
+    </div>
+
+    <p class="hint" id="secureHowto">
+      在红狐 Hub 后台复制你的 API Key（<code>ak_</code> 开头）粘到下面。
+      它<strong>只保存在这台设备的浏览器里</strong> —— 仅采集时传给工作台服务端、不写进网页源码；
+      采集时随请求带给本机服务端，由服务端通过红狐官方 MCP
+      （抖音 <code>redfox-douyin-mcp</code> / 小红书 <code>redfox-xiaohongshu-mcp</code>）取数，密钥不落库、不写日志。管理员也可统一配置服务端密钥，其他设备无需重复粘贴。
+    </p>
+
+    <div class="field-row">
+      <input id="secureKeyInput" type="password" placeholder="ak_..." autocomplete="off" spellcheck="false">
+      <button class="btn btn-primary" id="secureKeySave" type="button">保存</button>
+    </div>
+    <p class="field-err" id="secureKeyErr" hidden></p>
+
+    <div class="panel-actions">
+      <button class="btn btn-ghost btn-sm" id="secureKeyShow" type="button">显示</button>
+      <button class="btn btn-ghost btn-sm" id="secureKeyClear" type="button">清除密钥</button>
+    </div>
+
+    <p class="hint">没配也能正常用，只是采不到抖音 / 小红书的站内爆款数据。换设备 / 换浏览器需要重新粘贴一次。</p>
+  </div>
+</div>
+
 <div class="toast-wrap" id="toastWrap"></div>
 
 <div class="modal" id="modal" hidden>
@@ -454,6 +489,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<script src="./secure-store.js"></script>
+<script src="./trend-policy.js"></script>
 <script src="./account-strategy.js"></script>
 <script src="./app.js"></script>
 <script src="./account-settings.js"></script>
