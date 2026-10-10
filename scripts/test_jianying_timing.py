@@ -1,5 +1,5 @@
 import unittest
-from jianying_timing import media_durations, partition, validate_tracks
+from jianying_timing import media_durations, partition, validate_tracks, fill_scale
 class TimingTests(unittest.TestCase):
     def test_twenty_seconds_three_videos(self):
         durations = media_durations(20, [{'type':'video','path':'x'}]*3, lambda _:30)
@@ -11,6 +11,11 @@ class TimingTests(unittest.TestCase):
     def test_short_videos_and_photo(self):
         self.assertEqual(media_durations(20,[{'type':'video','path':'x'},{'type':'image'}],lambda _:3),[3_000_000,17_000_000])
         with self.assertRaises(ValueError):media_durations(20,[{'type':'video','path':'x'}],lambda _:3)
+    def test_cover_scale(self):
+        self.assertEqual(fill_scale(1080,1920),1)
+        self.assertAlmostEqual(fill_scale(1920,1080),256/81)
+        self.assertAlmostEqual(fill_scale(2160,3840),1)
+        with self.assertRaises(ValueError):fill_scale(0,1080)
     def test_overlap_validation(self):
         content={'tracks':[{'type':'video','segments':[{'target_timerange':{'start':0,'duration':6666667}},{'target_timerange':{'start':6666666,'duration':6666667}}]}]}
         with self.assertRaises(RuntimeError):validate_tracks(content)

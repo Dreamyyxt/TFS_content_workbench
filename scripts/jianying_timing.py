@@ -37,3 +37,14 @@ def validate_tracks(content):
             if span['start'] < end or span['duration'] <= 0:
                 raise RuntimeError('工程时间轴校验失败：片段重叠或时长无效')
             end = span['start'] + span['duration']
+
+def fill_scale(material_width, material_height, canvas_width=1080, canvas_height=1920):
+    """Scale the editor's default contain fit to cover, keeping pixels proportional.
+
+    Upstream normalizes HEVC portrait footage into a padded 1920x1080 file.
+    A cover transform removes those baked sidebars inside our portrait canvas.
+    """
+    if min(material_width, material_height, canvas_width, canvas_height) <= 0:
+        raise ValueError('素材尺寸无效，无法适配画布')
+    ratios = (canvas_width / material_width, canvas_height / material_height)
+    return max(ratios) / min(ratios)

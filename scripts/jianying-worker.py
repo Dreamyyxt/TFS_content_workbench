@@ -8,7 +8,7 @@ import threading
 import time
 import urllib.request
 from datetime import datetime
-from jianying_timing import media_durations, partition, validate_tracks
+from jianying_timing import media_durations, partition, validate_tracks, fill_scale
 
 sys.dont_write_bytecode = True
 skill = Path(os.environ.get('JY_SKILL_ROOT', Path.home()/'.codex/skills/jianying-editor')).expanduser().resolve()
@@ -42,7 +42,10 @@ def build(job):
         segment = project.add_media_safe(asset['path'], start_time=cursor, duration=duration, track_name='Video', source_start=0)
         if segment is None:
             raise RuntimeError('Skill 未能导入：'+asset['name'])
-        clips.append({'asset_id':asset['id'],'start':cursor/1_000_000,'duration':duration/1_000_000,'source_start':0})
+        scale = fill_scale(*segment.material_size)
+        segment.clip_settings.scale_x = scale
+        segment.clip_settings.scale_y = scale
+        clips.append({'scale':scale,'asset_id':asset['id'],'start':cursor/1_000_000,'duration':duration/1_000_000,'source_start':0})
         cursor += duration
     captions = [line.strip() for line in job.get('captions','').splitlines() if line.strip()]
     caption_cursor = 0
