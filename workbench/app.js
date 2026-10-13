@@ -1174,6 +1174,7 @@ function scriptForMaterial(id){
 }
 
 function renderMaterials(){
+  window.StudioMotion?.refresh('materials');
   const list = visibleMaterials();
   const grid = $('#materialGrid');
   $('#materialResultCount').textContent = list.length + ' 个选题';
@@ -2279,6 +2280,7 @@ function visibleMetrics(){
 }
 
 function renderData(){
+  window.StudioMotion?.refresh('data');
   if (!$('#dataKpis')) return;
   const list = visibleMetrics();
 
@@ -2673,6 +2675,7 @@ async function wipeData(key){
 /* Studio overview uses the same records as the existing production views. */
 const VIEW_LABELS = {home:'创作工作台',materials:'风口选题',scripts:'拍摄辅助',video:'视频制作',schedule:'自动排期',progress:'进度看板',data:'数据看板',profile:'店铺档案',admin:'数据管理'};
 function renderHome(){
+  window.StudioMotion?.refresh('home');
   const ready = S.loaded;
   const pending = S.materials.filter(m => m.selected && !scriptForMaterial(m.id));
   const planned = latestPlanRows();
@@ -2711,7 +2714,7 @@ function renderDataVisuals(list, average){
 }
 
 function switchView(v){
-  if (!VIEW_LABELS[v]) return;
+  if (!VIEW_LABELS[v] || $('#view-' + v).classList.contains('is-active')) return;
   $('#currentViewLabel').textContent = VIEW_LABELS[v];
   document.title = '第五季 · ' + VIEW_LABELS[v];
   $$('.tab').forEach(el => {
@@ -2723,7 +2726,8 @@ function switchView(v){
   $$('.tab').forEach(el => el.classList.toggle('is-active', el.dataset.view === v));
   /* 数据管理页显示的是实时条数，切过去时刷新一次 */
   if (v === 'admin') renderAdmin();
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  window.StudioMotion?.enter(v);
+  window.scrollTo({ top: 0, behavior: window.StudioMotion?.enabled() ? 'smooth' : 'instant' });
 }
 
 function bind(){

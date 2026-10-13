@@ -73,7 +73,45 @@ const fixture={
  }
  await page.setViewportSize({width:390,height:844});await page.locator('.tab[data-view="home"]').click();await page.evaluate(()=>scrollTo({top:0,behavior:'instant'}));await page.screenshot({path:join(artifactDir,'mobile.png'),fullPage:true,animations:"disabled"});
  await page.emulateMedia({reducedMotion:'reduce'});assert.equal(await page.locator('.core-orb').evaluate(el=>getComputedStyle(el).animationName),'none');
+ // Interrupt running chart animations: data stays final and reduced motion stops all effects.
+ await page.emulateMedia({reducedMotion:'no-preference'});
+ await page.setViewportSize({width:1440,height:1000});
+ await page.locator('.tab[data-view="data"]').click();
+ await page.locator('#dataFilter').selectOption('全部');
+ await page.waitForFunction(()=>document.querySelector('.chart-bar').getAnimations().some(a=>a.playState==='running'));
+ assert.equal(await page.locator('.ring-copy strong').textContent(),'45.0%');
+ await page.locator('#motionToggle').click();
+ assert.equal(await page.locator('body').getAttribute('data-motion'),'off');
+ assert.equal(await page.evaluate(()=>document.getAnimations().filter(a=>a.playState==='running').length),0);
+ assert.equal(await page.locator('.ring-copy strong').textContent(),'45.0%');
+ await page.reload();
+ await page.locator('#syncState.is-ok').waitFor();
+ assert.equal(await page.locator('#motionToggle').getAttribute('aria-pressed'),'false');
+ assert.equal(await page.locator('.core-orb').evaluate(el=>getComputedStyle(el).animationName),'none');
+ await page.locator('#motionToggle').click();
+ // Keyboard focus highlights the matching link, just like mouse hover.
+ await page.locator('.node-top-left').focus();
+ assert.equal(await page.locator('[data-network-route="materials"].is-linked').count(),2);
+ await page.locator('.node-top-right').focus();
+ assert.equal(await page.locator('[data-network-route="materials"].is-linked').count(),0);
+ assert.equal(await page.locator('[data-network-route="scripts"].is-linked').count(),2);
+ await page.locator('.tab[data-view="data"]').click();
+ await page.waitForFunction(()=>document.querySelector('.chart-bar').getAnimations().some(a=>a.playState==='running'));
+ await page.emulateMedia({reducedMotion:'reduce'});
+ await page.waitForFunction(()=>document.getElementById('motionToggle').disabled);
+ assert.equal(await page.locator('#motionToggle').isDisabled(),true);
+ assert.equal(await page.evaluate(()=>document.getAnimations().filter(a=>a.playState==='running').length),0);
+ assert.equal(await page.locator('.ring-copy strong').textContent(),'45.0%');
+ await page.emulateMedia({reducedMotion:'no-preference'});
+ for (const view of ['home','data','home','scripts','data','video']) await page.locator('.tab[data-view="'+view+'"]').click();
+ assert.equal(await page.locator('.view.is-active').count(),1);
+ assert.equal(await page.locator('body').getAttribute('data-active-view'),'video');
+ assert.equal(await page.evaluate(()=>document.getAnimations().filter(a=>a.playState==='running' && a.effect?.target?.closest('.view:not(.is-active)')).length),0);
+ await page.locator('#jyModeGenerate').click();
+ assert.equal(await page.locator('#jyModeGenerate').getAttribute('aria-pressed'),'true');
+ await page.locator('#jyModeEdit').click();
+ assert.equal(await page.locator('#jyModeEdit').getAttribute('aria-pressed'),'true');
  assert.deepEqual(errors,[]);
- console.log('PASS: overview counts, search, selection, script handoff, video modes, filtered charts/ranking, empty states, 9 views × 5 widths, reduced motion; no uncaught errors.');
+ console.log('PASS: overview counts, search, selection, script handoff, video modes, filtered charts/ranking, empty states, 9 views × 5 widths, motion preference persistence, keyboard links, animation cancellation, rapid navigation, reduced motion; no uncaught errors.');
  }finally{await browser.close()}
 })().catch(e=>{console.error(e);process.exitCode=1});

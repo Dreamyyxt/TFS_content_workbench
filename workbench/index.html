@@ -94,7 +94,7 @@
   <div class="main">
   <header class="studio-topbar">
     <div class="studio-breadcrumb">第五季 <span>/</span> <strong id="currentViewLabel">创作工作台</strong></div>
-    <div class="studio-top-actions"><time id="studioDate"></time><button class="studio-avatar" data-route="profile" aria-label="打开店铺档案">季</button></div>
+    <div class="studio-top-actions"><button class="motion-toggle" id="motionToggle" type="button" aria-label="界面动效" aria-pressed="true" hidden><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M3 12c3-9 5 9 8 0s5 0 6-4"/></svg><span id="motionToggleLabel">动效开启</span></button><time id="studioDate"></time><button class="studio-avatar" data-route="profile" aria-label="打开店铺档案">季</button></div>
   </header>
   <main id="views" tabindex="-1">
 
@@ -103,7 +103,7 @@
     <div class="creative-stage">
       <div class="stage-intro"><p class="eyebrow">THE FIFTH SEASON · STUDIO</p><h3>让每一个灵感，<br>都有下一步<span>。</span></h3><p class="stage-description">从发现风向，到作品发布。<br>把好内容，一点点做出来。</p><div class="stage-status" id="homeLoadState" role="status"><i></i>正在连接你的创作空间</div><button class="stage-link" data-route="progress">查看创作进度 <span>↗</span></button></div>
       <div class="creative-network" aria-label="内容创作流程">
-        <svg class="network-lines" viewBox="0 0 660 390" preserveAspectRatio="none" aria-hidden="true"><path d="M330 195C250 195 200 85 125 85M330 195C420 195 430 80 535 80M330 195C220 195 220 315 130 315M330 195C420 195 440 310 535 310"/></svg>
+        <svg class="network-lines" viewBox="0 0 660 390" preserveAspectRatio="none" aria-hidden="true"><path data-network-route="materials" d="M330 195C250 195 200 85 125 85"/><path class="network-flow" data-network-route="materials" d="M330 195C250 195 200 85 125 85"/><path data-network-route="scripts" d="M330 195C420 195 430 80 535 80"/><path class="network-flow" data-network-route="scripts" d="M330 195C420 195 430 80 535 80"/><path data-network-route="video" d="M330 195C220 195 220 315 130 315"/><path class="network-flow" data-network-route="video" d="M330 195C220 195 220 315 130 315"/><path data-network-route="schedule" d="M330 195C420 195 440 310 535 310"/><path class="network-flow" data-network-route="schedule" d="M330 195C420 195 440 310 535 310"/></svg>
         <div class="creative-core"><div class="core-track"></div><div class="core-orb"><span class="orb-petal p1"></span><span class="orb-petal p2"></span><span class="orb-petal p3"></span><span class="orb-petal p4"></span><span class="orb-petal p5"></span><span class="orb-center"></span></div><div class="core-label">灵感，在这里生长<small>CONTENT STUDIO</small></div></div>
         <button class="network-node node-top-left" data-route="materials"><span class="node-orb">✦</span><span class="node-caption"><span><b id="homeMaterialCount">—</b> 个灵感</span><strong>风口选题 <em>↗</em></strong><small>DISCOVER</small></span></button>
         <button class="network-node node-top-right" data-route="scripts"><span class="node-orb">✎</span><span class="node-caption"><span><b id="homeScriptCount">—</b> 份脚本</span><strong>拍摄辅助 <em>↗</em></strong><small>CREATE</small></span></button>
@@ -581,6 +581,7 @@ node start-jianying.cjs</code></pre>
 <script src="./trend-policy.js"></script>
 <script src="./humanizer-policy.js"></script>
 <script src="./account-strategy.js"></script>
+<script src="./studio-motion.js"></script>
 <script src="./app.js"></script>
 <script src="./account-settings.js"></script>
 <script src="./jy-catalog.js"></script>
