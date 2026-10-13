@@ -8,6 +8,8 @@ import threading
 import time
 import urllib.request
 from datetime import datetime
+from jianying_edit import make_edit
+from jianying_timing import media_durations, partition, validate_tracks, fill_scale
 
 sys.dont_write_bytecode = True
 skill = Path(os.environ.get('JY_SKILL_ROOT', Path.home()/'.codex/skills/jianying-editor')).expanduser().resolve()
@@ -32,35 +34,34 @@ def call(route, body, claim=None):
 def build(job):
     assets = job['assets']
     target = job['duration']
-    share = target / len(assets)
-    durations = [min(share, float(get_duration_ffprobe_cached(a['path']))) if a['type']=='video' else share for a in assets]
-    if any(d <= 0 for d in durations):
-        raise ValueError('视频时长无效，请检查素材')
-    shortfall = target-sum(durations)
-    photos = [i for i,a in enumerate(assets) if a['type']=='image']
-    if shortfall > 0.02 and not photos:
-        raise ValueError('视频长度不足目标时长，请补充照片或更长视频')
-    for i in photos:
-        durations[i] += shortfall/len(photos)
+    durations = media_durations(target, assets, get_duration_ffprobe_cached) if not job.get('edit_plan') else []
     name = '第五季-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'-'+job['id'][:8]+'-'+job['claim'][:8]
     project = JyProject(name, width=1080, height=1920, drafts_root=str(drafts), overwrite=False)
+    if job.get('edit_plan'):
+        return make_edit(project,job,skill,get_duration_ffprobe_cached,lambda stage:call('worker/jobs/'+job['id']+'/heartbeat',{'stage':stage},job['claim']))
     cursor = 0
     clips = []
     for asset,duration in zip(assets,durations):
-        segment = project.add_media_safe(asset['path'], start_time=f'{cursor:.6f}s', duration=f'{duration:.6f}s', track_name='Video', source_start=0)
+        segment = project.add_media_safe(asset['path'], start_time=cursor, duration=duration, track_name='Video', source_start=0)
         if segment is None:
             raise RuntimeError('Skill 未能导入：'+asset['name'])
-        clips.append({'asset_id':asset['id'],'start':cursor,'duration':duration,'source_start':0})
+        scale = fill_scale(*segment.material_size)
+        segment.clip_settings.scale_x = scale
+        segment.clip_settings.scale_y = scale
+        clips.append({'scale':scale,'asset_id':asset['id'],'start':cursor/1_000_000,'duration':duration/1_000_000,'source_start':0})
         cursor += duration
     captions = [line.strip() for line in job.get('captions','').splitlines() if line.strip()]
-    for i,text in enumerate(captions):
-        project.add_text_simple(text, start_time=f'{i*cursor/len(captions):.6f}s', duration=f'{cursor/len(captions):.6f}s')
+    caption_cursor = 0
+    for text, duration in zip(captions, partition(cursor, len(captions)) if captions else []):
+        project.add_text_simple(text, start_time=caption_cursor, duration=duration)
+        caption_cursor += duration
     result = project.save()
     folder = Path(result['draft_path'])
     info = folder/'draft_info.json'
     if not info.exists():
         info = folder/'draft_content.json'
     content = json.loads(info.read_text())
+    validate_tracks(content)
     actual = sum(len(t.get('segments',[])) for t in content.get('tracks',[]) if t.get('type')=='video')
     if actual != len(assets) or not (folder/'draft_meta_info.json').exists():
         raise RuntimeError('工程结构校验失败')

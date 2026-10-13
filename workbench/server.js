@@ -1264,6 +1264,8 @@ const STATIC_FILES = new Set([
   '/account-strategy.js',
   '/account-settings.js',
   '/jianying-studio.js',
+  '/jy-catalog.js',
+  '/edit-plan.js',
   '/secure-store.js',
   '/trend-policy.js',
   '/humanizer-policy.js',

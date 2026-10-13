@@ -1,0 +1,140 @@
+{
+  "plan": {
+    "version": 2,
+    "clips": [
+      {
+        "asset_id": "a0",
+        "source_start_us": 0,
+        "start_us": 0,
+        "duration_us": 4000000,
+        "reason": "开场特写",
+        "motion": "push_in",
+        "keyframes": [
+          {
+            "property": "uniform_scale",
+            "at": 0,
+            "value": 1.0
+          },
+          {
+            "property": "uniform_scale",
+            "at": 1,
+            "value": 1.12
+          }
+        ],
+        "filter": {
+          "name": "奶油",
+          "intensity": 80
+        },
+        "effect": {
+          "name": "柔和辉光"
+        },
+        "transition": {
+          "name": "叠化",
+          "duration_us": 500000
+        }
+      },
+      {
+        "asset_id": "a1",
+        "source_start_us": 0,
+        "start_us": 4000000,
+        "duration_us": 4000000,
+        "reason": "过程",
+        "motion": "pan_left",
+        "keyframes": [
+          {
+            "property": "uniform_scale",
+            "at": 0,
+            "value": 1.08
+          },
+          {
+            "property": "uniform_scale",
+            "at": 1,
+            "value": 1.08
+          },
+          {
+            "property": "position_x",
+            "at": 0,
+            "value": 0.05
+          },
+          {
+            "property": "position_x",
+            "at": 1,
+            "value": -0.05
+          }
+        ],
+        "filter": {
+          "name": "自然",
+          "intensity": 50
+        },
+        "effect": {
+          "name": "贴身粒子"
+        },
+        "transition": {
+          "name": "闪黑",
+          "duration_us": 300000
+        }
+      },
+      {
+        "asset_id": "a2",
+        "source_start_us": 0,
+        "start_us": 8000000,
+        "duration_us": 4000000,
+        "reason": "成品",
+        "motion": null,
+        "keyframes": [],
+        "filter": null,
+        "effect": null,
+        "transition": null
+      }
+    ],
+    "captions": [
+      {
+        "text": "显白只要 99 元",
+        "start_us": 0,
+        "duration_us": 2000000,
+        "anim": "随机打字机",
+        "highlight": [
+          {
+            "word": "99 元"
+          }
+        ]
+      },
+      {
+        "text": "今天做裸色猫眼",
+        "start_us": 4000000,
+        "duration_us": 2000000,
+        "anim": "弹入",
+        "highlight": []
+      }
+    ],
+    "narration": "",
+    "music_query": "舒缓",
+    "summary": "能力验证",
+    "warnings": []
+  },
+  "options": {
+    "voice": "music",
+    "speaker": "zh_female_xiaopengyou",
+    "music": "none",
+    "music_volume": 0.6,
+    "music_asset_id": null
+  },
+  "report": {
+    "voice": "music",
+    "subtitles": 2,
+    "music": null,
+    "warnings": [],
+    "transitions": 2,
+    "filters": 2,
+    "effects": 2,
+    "keyframes": 6,
+    "highlights": 1,
+    "anims": 2,
+    "landed": {
+      "transitions": 2,
+      "filters": 2,
+      "effects": 2,
+      "keyframed_clips": 2
+    }
+  }
+}
