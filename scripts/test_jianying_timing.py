@@ -21,4 +21,13 @@ class TimingTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):validate_tracks(content)
         content['tracks'][0]['segments'][1]['target_timerange']['start']=6666667
         validate_tracks(content)
+    def test_effect_and_filter_tracks_are_validated_too(self):
+        """转场/滤镜/画面特效各自占独立轨道，重叠同样要在剪映打开前就拦住。"""
+        for track_type in ('effect','filter'):
+            content={'tracks':[{'type':track_type,'name':'X','segments':[
+                {'target_timerange':{'start':0,'duration':1000000}},
+                {'target_timerange':{'start':500000,'duration':1000000}}]}]}
+            with self.assertRaises(RuntimeError):validate_tracks(content)
+            content['tracks'][0]['segments'][1]['target_timerange']['start']=1000000
+            validate_tracks(content)
 if __name__=='__main__':unittest.main()

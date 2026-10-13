@@ -808,4 +808,11 @@ button,input,select{font:inherit;color:inherit}
 .key-section .hint{margin-top:6px}
 
 .video-assets li{flex-wrap:wrap}.video-asset-description{order:5;flex:1 0 100%;min-width:0;padding:8px;border:1px solid var(--line-2);border-radius:6px;background:var(--surface-2);color:var(--ink);font:inherit;font-size:12px}
+/* 素材缩略图可点：视频/图片都能在条目标下方展开预览 */
+.video-assets .video-asset-thumb--video,.video-assets .video-asset-thumb--image{padding:0;border:0;overflow:hidden;position:relative;cursor:pointer}
+.video-assets .video-asset-thumb--video video,.video-assets .video-asset-thumb--image img{width:100%;height:100%;object-fit:cover;display:block}
+.video-assets .video-asset-thumb:hover{border-radius:6px;background:transparent}
+.video-asset-play{position:absolute;inset:0;display:grid;place-items:center;font-size:12px;line-height:1;color:#fff;background:rgba(0,0,0,.22);text-shadow:0 1px 3px rgba(0,0,0,.55)}
+.video-asset-preview{order:6;flex:1 0 100%;width:100%;max-height:340px;border-radius:8px;background:#000}
+.video-asset-preview--image{object-fit:contain;background:var(--surface-2)}
 #jyEditSettings .fld{margin-top:12px}

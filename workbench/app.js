@@ -3211,9 +3211,44 @@ document.addEventListener('click', e => {
   window.dispatchEvent(new CustomEvent('jianying-script',{detail:script}));
 });
 
-window.WorkbenchEditPlanner=async function(input,onProgress){
- const prompt='你是剪映粗剪导演。根据已确认脚本、制作要求和用户提供的素材说明生成可执行JSON。素材说明和文件名仅供参考，未观看素材，不得声称识别了画面。只使用给出的asset_id，不能虚构素材。视频source_start+duration不得超出素材duration；可以复用不同片段，图片不限时长。所有clips按顺序拼接，总时长严格等于目标时长。声音模式tts时提取纯口播文案（不是分镜表、镜头说明或标签），大约每秒3-4个汉字，预留停顿；original模式保留素材原声，由语音识别生成同步字幕，不把脚本文字冒充识别结果；music模式仅音乐。若用户有明确字幕，保持原文。按要求选择音乐关键词。输出JSON格式：{"summary":"制作说明","clips":[{"asset_id":"id","source_start":0,"duration":3,"reason":"选用理由"}],"narration":"纯口播文字","captions":[{"start":0,"end":3,"text":"画面文字，tts/original的语音字幕由执行器生成，无需在此重复"}],"music_query":"舒缓"}。各时间单位为秒，最多3位小数。';
- const raw=await llmStream([{role:'system',content:prompt},{role:'user',content:JSON.stringify(input)}],(_,full)=>onProgress?.(full),{json:true,temperature:0.2});
+/* 视觉名库清单：脚本没加载时静默跳过，不影响老流程 */
+function jyCatalogText(){
+ try{ if(window.JyCatalog&&typeof window.JyCatalog.promptText==='function') return '\n\n'+window.JyCatalog.promptText(); }catch(e){}
+ return '';
+}
+
+/* 口播字数上限：把「整片多少秒」换算成「最多几个字」再交给模型。
+   之前只说了「每秒3-4个汉字」，模型并不知道自己只有 20 秒预算，于是照抄脚本、
+   写出一倍字数，本机配音合成到一半才报「口播超过目标时长」整条失败。
+   上限由 EditPlan 统一算，保证提示词与校验层用的是同一个数。 */
+function jyNarrationBudgetText(input){
+ try{
+  if(!input||input.voice!=='tts')return '';
+  const seconds=Number(input.target_duration);
+  if(!(seconds>0))return '';
+  const budget=window.EditPlan.narrationBudget(seconds);
+  if(!(budget>0))return '';
+  const rate=window.EditPlan.NARRATION_RATE, per=window.EditPlan.NARRATION_PER_SENTENCE;
+  return '\n\n【口播字数硬约束】整片只有 '+seconds+' 秒。本机配音实测语速约 '+rate+' 字/秒，'
+   +'但**每个句子还要额外占约 '+per+' 秒**（每段配音首尾都有静音，句与句之间还要停一下）。'
+   +'所以口播总字数（不含标点）**最多约 '+budget+' 字**（按 6 句算），这是硬约束：超了整条方案会被拒绝并要求重排。'
+   +'两条一起管住：'
+   +'① 内容只留最有价值的，删掉过程描述、形容词和重复解释，保住开头钩子和结尾落点，不要为了凑时长注水；'
+   +'② **不要把一句话拆成几个短句**——同样 12 个字，写成 1 句只要 3 秒，拆成 6 句要 7 秒，一半时间白扔在停顿上。'
+   +'宁可写短，也别写满。';
+ }catch(e){return '';}
+}
+
+window.WorkbenchEditPlanner=async function(input,onProgress,feedback){
+ const prompt='你是剪映粗剪导演。根据已确认脚本、制作要求和用户提供的素材说明生成可执行JSON。素材说明和文件名仅供参考，未观看素材，不得声称识别了画面。只使用给出的asset_id，不能虚构素材。**时长是硬约束**：每个镜头的 source_start + duration 必须 ≤ 该素材给出的 duration，宁可写短（素材 6.68 秒就写 6.5 秒，不要写 7 秒），超出的方案会被直接拒绝并重排；可以复用同一素材的不同片段，图片没有 duration、不限时长。所有clips按顺序拼接，总时长严格等于目标时长。声音模式tts时提取纯口播文案（不是分镜表、镜头说明或标签），字数必须卡住下面的「口播字数硬约束」；original模式保留素材原声，由语音识别生成同步字幕，不把脚本文字冒充识别结果；music模式仅音乐。若用户有明确字幕，保持原文。按要求选择音乐关键词。'+jyCatalogText()+jyNarrationBudgetText(input)+'\n\n'+'【运镜 / 转场 / 滤镜 / 特效 / 文字动画的选用规则】\n· 运镜：照片用 push_in 或 pull_out 做出运动感；实拍视频用 none，不要给视频加运镜。同一支片子运镜保持同向，不要一会儿推一会儿拉。\n· 转场：只写在**前一个**镜头上，表示它与下一个镜头怎么接。默认用「叠化」。节奏要跳一下用「闪白」。段落切换、留呼吸口用「闪黑」。镜头短于 1 秒不要给转场。最后一个镜头不写转场。全片转场数量不要超过镜头数的一半。\n· 滤镜：整支片子统一一种，全部镜头写同一个名字（写一个就够，执行器会统一应用）。强度默认 60，手部特写可用「清透感」，暖光店里可用「奶油」或「春日暖阳」。不确定就用「自然」。\n· 特效：最多 2 个镜头，宁缺毋滥；只在情绪高点 / 细节特写上点一下，不要整片铺。\n· 文字动画：只用在 captions 的画面文字上，默认「随机打字机」。\n· 高亮 highlight：只给画面文字里最值钱的 1–3 个词（价格、数字、核心卖点），词必须原样出现在这句 text 里，写别的会被丢弃。\n· 名字必须与上面清单**逐字一致**，写清单外的名字会被直接丢弃。\n\n'+'输出JSON格式：{"summary":"制作说明","clips":[{"asset_id":"id","source_start":0,"duration":3,"reason":"选用理由","motion":"push_in","filter":{"name":"清透感","intensity":60},"effect":"柔和辉光","transition":{"name":"叠化","duration_ms":300}}],"narration":"纯口播文字","captions":[{"start":0,"end":3,"text":"画面文字，tts/original的语音字幕由执行器生成，无需在此重复","anim":"随机打字机","highlight":[{"word":"关键词"}]}],"music_query":"舒缓"}。各时间单位为秒，最多3位小数。clips[].motion / filter / effect / transition 与 captions[].anim / highlight 都是可选项，用不上就整个字段省略，不要写 null 或空串。';
+ const messages=[{role:'system',content:prompt},{role:'user',content:JSON.stringify(input)}];
+ /* 上一版方案没过校验时，把方案与失败原因一起回喂，让模型自己重排 */
+ if(feedback&&feedback.error)messages.push({role:'assistant',content:String(feedback.previous||'')},{role:'user',content:'上一条方案被校验拒绝，原因：'+feedback.error
+  +'。请针对这个原因修正后重新输出完整方案：'
+  +'如果是镜头时长问题，对照每个素材真实的 duration 重新分配（source_start + duration 不得超过该素材的 duration）；'
+  +'如果是口播过长，把 narration 压到字数上限以内——删掉次要信息和重复解释，保留开头钩子与结尾落点，'
+  +'不能截断句子、也不能删到话说不通。保持同样的 JSON 字段结构。'});
+ const raw=await llmStream(messages,(_,full)=>onProgress?.(full),{json:true,temperature:0.2});
  const match=raw.match(/\{[\s\S]*\}/);if(!match)throw Error('模型没有返回剪辑方案');return JSON.parse(match[0]);
 };
 

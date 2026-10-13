@@ -138,7 +138,12 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
       }
       if(route==='assets/inspect'&&req.method==='POST'){
         const b=await json(req);if(!Array.isArray(b.asset_ids)||b.asset_ids.length>30)fail(400,'素材列表无效');const result=[];
-        for(const id of b.asset_ids){const a=state.assets.find(a=>a.id===id);if(!a||a.type==='audio')fail(400,'请使用照片或视频素材');let info={};if(a.type==='video'){try{const {stdout}=await execFile(process.env.JY_FFPROBE||'ffprobe',['-v','error','-show_entries','format=duration:stream=width,height,codec_type','-of','json',path.join(dir,a.id+a.ext)],{timeout:15000,maxBuffer:1024*1024});const p=JSON.parse(stdout);info={duration:Number(p.format?.duration),has_audio:p.streams.some(s=>s.codec_type==='audio'),width:p.streams.find(s=>s.codec_type==='video')?.width,height:p.streams.find(s=>s.codec_type==='video')?.height};if(!Number.isFinite(info.duration)||info.duration<=0)throw Error();}catch{fail(400,'无法读取视频：'+a.name);}}result.push({id:a.id,name:a.name,type:a.type,...info});}send(res,200,result);return true;
+        for(const id of b.asset_ids){const a=state.assets.find(a=>a.id===id);if(!a||a.type==='audio')fail(400,'请使用照片或视频素材');let info={};if(a.type==='video'){try{const {stdout}=await execFile(process.env.JY_FFPROBE||'ffprobe',['-v','error','-show_entries','format=duration:stream=width,height,codec_type','-of','json',path.join(dir,a.id+a.ext)],{timeout:15000,maxBuffer:1024*1024});const p=JSON.parse(stdout);info={duration:Number(p.format?.duration),has_audio:p.streams.some(s=>s.codec_type==='audio'),width:p.streams.find(s=>s.codec_type==='video')?.width,height:p.streams.find(s=>s.codec_type==='video')?.height};if(!Number.isFinite(info.duration)||info.duration<=0)throw Error();}catch{fail(400,'无法读取视频：'+a.name);}}result.push({id:a.id,name:a.name,type:a.type,...info});
+          /* 把探测到的时长/宽高写回素材记录：这样提交方案时的二次校验（下面 jobs POST）
+             也能查素材真实长度，而不是只能拿到文件名和大小。 */
+          Object.assign(a, info);
+        }
+        save();send(res,200,result);return true;
       }
       if (route === 'jobs' && req.method === 'GET') {send(res,200,state.jobs.map(safeJob));return true;}
       if (route === 'jobs' && req.method === 'POST') {

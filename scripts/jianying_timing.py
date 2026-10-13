@@ -28,8 +28,10 @@ def media_durations(target, assets, probe):
     return durations
 
 def validate_tracks(content):
+    """同一轨道内不允许片段重叠或零长。转场/滤镜/画面特效各自占独立轨道，
+    也要一起校验，否则叠加的视觉项会在剪映里互相吃掉。"""
     for track in content.get('tracks', []):
-        if track.get('type') not in ('video', 'text'):
+        if track.get('type') not in ('video', 'text', 'effect', 'filter'):
             continue
         end = 0
         for segment in sorted(track.get('segments', []), key=lambda s: s['target_timerange']['start']):
