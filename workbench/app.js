@@ -491,6 +491,9 @@ function llmError(e){
    --------------------------------------------------------------------- */
 const S = {
   materials: [],
+  loaded: false,
+  loadError: false,
+  search: '',
   scripts: [],
   schedules: [],
   metrics: [],
@@ -671,6 +674,8 @@ function visibleMaterials(){
     if (b) list = list.filter(m => m.batch_id === b);
   }
   if (S.filter !== '全部') list = list.filter(m => m.account === S.filter);
+  const query = S.search.trim().toLocaleLowerCase();
+  if(query) list = list.filter(m => [m.title,m.keywords,m.account,m.angle,m.hook].join(' ').toLocaleLowerCase().includes(query));
   return list;
 }
 
@@ -1171,6 +1176,8 @@ function scriptForMaterial(id){
 function renderMaterials(){
   const list = visibleMaterials();
   const grid = $('#materialGrid');
+  $('#materialResultCount').textContent = list.length + ' 个选题';
+  $('#materialEmpty').textContent = S.search || S.filter !== '全部' ? '没有匹配的选题，试试其他关键词或账号。' : '还没有选题。点击「实时采集风向」获取灵感，或载入趋势底稿。';
   if (!list.length){
     grid.innerHTML = '';
     $('#materialEmpty').hidden = false;
@@ -1196,9 +1203,9 @@ function renderMaterials(){
       (kws.length ? '<div class="card-kw">' + kws.map(k => '<span>' + esc(k.trim()) + '</span>').join('') + '</div>' : '') +
       (m.trend_reason ? '<div class="card-reason">' + esc(m.trend_reason) + '</div>' : '') +
       '<div class="card-foot">' +
-        '<label class="pick" data-pick="' + m.id + '">' +
+        '<button type="button" class="pick" aria-pressed="' + !!m.selected + '" data-pick="' + esc(m.id) + '">' +
           (m.selected ? '✓ 已加入待制作' : '+ 加入待制作') +
-        '</label>' +
+        '</button>' +
         '<button class="btn-danger-ghost" data-del="' + m.id + '" title="删除该素材">删除</button>' +
       '</div>' +
     '</article>';
@@ -1210,12 +1217,12 @@ async function togglePick(id){
   if (!m) return;
   const next = !m.selected;
   m.selected = next;
-  renderMaterials(); renderBadges(); renderPending(); renderProgress();
+  renderMaterials(); renderBasket(); renderBadges(); renderPending(); renderProgress();
   const { data, error } = await cloud.database.from('materials')
     .update({ selected: next }).eq('id', id).select();
   if (error || !data || !data.length){
     m.selected = !next;
-    renderMaterials(); renderBadges(); renderPending(); renderProgress();
+    renderMaterials(); renderBasket(); renderBadges(); renderPending(); renderProgress();
     toast('保存失败，请重试', 'err');
   }
 }
@@ -1238,6 +1245,7 @@ function renderBasket(){
 }
 
 function renderBadges(){
+  renderHome();
   const pend = S.materials.filter(m => m.selected).length;
   const bm = $('#badgeMaterials'), bs = $('#badgeScripts'), bc = $('#badgeSchedule');
   bm.textContent = S.materials.length;
@@ -2285,9 +2293,10 @@ function renderData(){
   const interactions = sum(list, m => (Number(m.likes)||0) + (Number(m.comments)||0) +
     (Number(m.saves)||0) + (Number(m.shares)||0));
   const interRate = totalViews > 0 ? interactions / totalViews * 100 : null;
+  renderDataVisuals(list, avgF3);
 
   $('#dataKpis').innerHTML = [
-    kpiCard('已录入视频', S.metrics.length, list.length !== S.metrics.length ? '当前筛出 ' + list.length + ' 条' : '', 'is-brand'),
+    kpiCard('已录入视频', list.length, '当前账号范围 · 共 ' + S.metrics.length + ' 条', 'is-brand'),
     kpiCard('总播放量', nfNum(totalViews), list.length ? list.length + ' 条合计' : '暂无数据'),
     kpiCard('平均 3 秒完播', avgF3 == null ? '—' : nfPct(avgF3), '参考线 ≥ ' + THRESH.f3 + '%',
       avgF3 == null ? '' : (avgF3 >= THRESH.f3 ? 'is-ok' : 'is-warn')),
@@ -2342,7 +2351,7 @@ function renderData(){
   }
 
   /* 选题回溯：按 3 秒完播率排，完播缺失的按播放量兜底 */
-  const ranked = S.metrics.slice().filter(m => m.views != null || m.finish_3s != null).sort((a,b) => {
+  const ranked = list.slice().filter(m => m.views != null || m.finish_3s != null).sort((a,b) => {
     const af = a.finish_3s == null ? -1 : Number(a.finish_3s);
     const bf = b.finish_3s == null ? -1 : Number(b.finish_3s);
     if (bf !== af) return bf - af;
@@ -2661,7 +2670,55 @@ async function wipeData(key){
 /* ---------------------------------------------------------------------
    14. 事件绑定
    --------------------------------------------------------------------- */
+/* Studio overview uses the same records as the existing production views. */
+const VIEW_LABELS = {home:'创作工作台',materials:'风口选题',scripts:'拍摄辅助',video:'视频制作',schedule:'自动排期',progress:'进度看板',data:'数据看板',profile:'店铺档案',admin:'数据管理'};
+function renderHome(){
+  const ready = S.loaded;
+  const pending = S.materials.filter(m => m.selected && !scriptForMaterial(m.id));
+  const planned = latestPlanRows();
+  $('#homeMaterialCount').textContent = ready ? S.materials.length : '—';
+  $('#homeScriptCount').textContent = ready ? S.scripts.length : '—';
+  $('#homeScheduleCount').textContent = ready ? planned.length : '—';
+  const status = $('#homeLoadState');
+  status.classList.toggle('is-ready', ready);
+  status.classList.toggle('is-error', !!S.loadError);
+  status.innerHTML = '<i></i>' + (ready ? '创作空间已同步 · 从任意一步开始' : S.loadError ? '云端暂未连接 · 刷新页面重试' : '正在连接你的创作空间');
+  const stats = [
+    ['materials','✦','灵感选题',S.materials.length],
+    ['scripts','✎','待写脚本',pending.length],
+    ['schedule','▦','当前排期',planned.length],
+    ['data','↗','已录入作品',S.metrics.length]
+  ];
+  $('#homeSummary').innerHTML = stats.map(([route,icon,label,value]) => '<button class="summary-item" data-route="'+route+'"><span class="summary-icon" aria-hidden="true">'+icon+'</span><span><small>'+label+'</small><strong>'+(ready ? value : '—')+'</strong></span><span aria-hidden="true">↗</span></button>').join('');
+  const tasks = pending.slice(0,3).map(m=>({title:m.title,account:m.account,kind:'待写脚本',route:'scripts'}));
+  if(tasks.length < 3) S.scripts.slice(0,3-tasks.length).forEach(s=>tasks.push({title:s.title,account:s.account,kind:'脚本已就绪',id:s.id}));
+  $('#homeNext').innerHTML = tasks.length ? tasks.map((t,i)=>'<div class="next-item"><span class="next-index">0'+(i+1)+'</span><div class="next-copy"><strong title="'+esc(t.title)+'">'+esc(t.title)+'</strong><small>'+esc(t.account)+' · '+t.kind+'</small></div><button class="btn btn-ghost btn-sm" '+(t.id ? 'data-makevideo="'+esc(t.id)+'"' : 'data-route="scripts"')+'>'+(t.id?'制作视频':'去写脚本')+' ↗</button></div>').join('') : '<div class="home-placeholder">'+(!ready ? (S.loadError ? '暂时无法读取创作记录，请刷新后重试。' : '正在读取你的选题和脚本…') : '还没有待办，从选一个喜欢的题目开始。<br><button class="btn btn-ghost btn-sm" data-route="materials">去发现灵感 ↗</button>')+'</div>';
+  $('#homeAccounts').innerHTML = ACCOUNTS.map(a=>'<div class="channel-row"><span class="channel-avatar">'+esc(a.name.slice(0,1))+'</span><div class="channel-info">'+esc(a.name)+'<small>'+esc(a.platform)+' · 每周 '+esc(a.perWeek)+' 条</small></div><div class="channel-total">'+(ready ? S.scripts.filter(s=>s.account===a.name).length : '—')+' <small>份脚本</small></div></div>').join('');
+}
+
+function renderDataVisuals(list, average){
+  const byDay = new Map();
+  list.forEach(m => {
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(m.publish_date || '')) return;
+    byDay.set(m.publish_date, (byDay.get(m.publish_date) || 0) + Math.max(0,Number(m.views)||0));
+  });
+  const days = [...byDay.entries()].sort(([a],[b])=>a.localeCompare(b)).slice(-7);
+  const max = Math.max(1,...days.map(([,v])=>v));
+  $('#dataChart').innerHTML = days.length ? '<div class="chart-bars" role="img" aria-label="'+esc(days.map(([day,v])=>day+' 播放 '+v).join('；'))+'">'+days.map(([day,v])=>'<div class="chart-column" title="'+esc(day)+' · 播放 '+v+'"><b>'+nfNum(v)+'</b><div class="chart-bar" style="height:'+Math.max(2,v/max*154)+'px"></div><small>'+Number(day.slice(5,7))+'/'+Number(day.slice(8))+'</small></div>').join('')+'</div>' : '<div class="chart-empty"><span aria-hidden="true">▥</span>录入作品数据后，播放表现会出现在这里</div>';
+  const pct = average == null ? 0 : Math.max(0, Math.min(100, average));
+  const display = average == null ? '—' : nfPct(average);
+  $('#dataRetention').innerHTML = '<div class="retention-ring" role="img" aria-label="平均3秒完播率 '+esc(average == null ? '暂无数据' : display)+'"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="ring-track" cx="60" cy="60" r="48"/><circle class="ring-value" cx="60" cy="60" r="48" pathLength="100" stroke-dasharray="'+pct+' 100"'+(pct===0?' style="opacity:0"':'')+'/></svg><div class="ring-copy"><strong>'+display+'</strong><small>'+(average == null ? '等待数据' : average >= THRESH.f3 ? '达到参考线' : '仍有提升空间')+'</small></div></div>';
+}
+
 function switchView(v){
+  if (!VIEW_LABELS[v]) return;
+  $('#currentViewLabel').textContent = VIEW_LABELS[v];
+  document.title = '第五季 · ' + VIEW_LABELS[v];
+  $$('.tab').forEach(el => {
+    if(el.dataset.view === v) el.setAttribute('aria-current','page');
+    else el.removeAttribute('aria-current');
+  });
+  if (v === 'home') renderHome();
   $$('.view').forEach(el => el.classList.toggle('is-active', el.id === 'view-' + v));
   $$('.tab').forEach(el => el.classList.toggle('is-active', el.dataset.view === v));
   /* 数据管理页显示的是实时条数，切过去时刷新一次 */
@@ -2670,6 +2727,14 @@ function switchView(v){
 }
 
 function bind(){
+  $('#studioDate').textContent = new Date().toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai',month:'long',day:'numeric',weekday:'long'});
+  $('#studioDate').dateTime = new Date().toISOString();
+  document.addEventListener('click', e => {
+    const route = e.target.closest('[data-route]');
+    if(route){ switchView(route.dataset.route); $('#views').focus({preventScroll:true}); }
+  });
+  $('#materialSearch').addEventListener('input', e => { S.search = e.target.value; renderMaterials(); });
+
   $('#tabs').addEventListener('click', e => {
     const t = e.target.closest('.tab'); if (t) switchView(t.dataset.view);
   });
@@ -3167,6 +3232,7 @@ async function boot(){
   try{ bind(); }
   catch(err){ console.error('[工作台] 事件绑定失败', err); }
   try{
+    renderHome();
     setSync('连接中', 'is-busy');
     initCloud();
     await Promise.all([dbLoadMaterials(), dbLoadScripts(), dbLoadSchedules(), dbLoadMetrics(), dbLatestTrend()]);
@@ -3185,6 +3251,7 @@ async function boot(){
       toast('已自动载入趋势底稿，可点「同步联网风向」获取本季真实风向', 'ok');
     }
 
+    S.loaded = true;
     $('#schedStart').value = ymd(startOfWeek(new Date()));
     fillMetricControls();
     fillDataFilter();
@@ -3193,6 +3260,8 @@ async function boot(){
     setSync('已同步', 'is-ok');
   }catch(e){
     console.error(e);
+    S.loadError = true;
+    renderHome();
     setSync('连接失败', 'is-err');
     toast('无法连接云服务：' + (e.message || e), 'err');
   }
