@@ -1,6 +1,10 @@
 #!/bin/bash
 # 同步「发布镜像」目录 —— 每次重新发布工作台之前必须跑一次
 #
+# ⚠️ 现在推荐直接跑 `bash tools/publish.sh`：它在本脚本的基础上多了「回退体检」与
+#    「sha256 + node --check 复核」。本脚本保留为「只同步、不检查」的轻量入口。
+#    完整发布流程见 docs/PUBLISH.md
+#
 # 为什么要这个镜像：
 #   工作台的线上应用（appId wbapp_OVXOIXh914a31yrMdLVAOD，链接 nail-content-workbench）
 #   是按【本地目录路径】绑定的。工程在 2026-10-09 改名搬迁后，发布工具认不回旧应用，
