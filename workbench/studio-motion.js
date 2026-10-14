@@ -23,7 +23,7 @@
 
   function stop(scope) {
     for (const [animation, owner] of effects) {
-      if (!scope || owner === scope) {
+      if (!scope || owner === scope || scope.contains(owner)) {
         animation.cancel();
         effects.delete(animation);
       }
@@ -86,7 +86,7 @@
   // Local updates own their animations so rapid input cannot queue stale transitions.
   function region(element, direction = 0) {
     stop(element);
-    if (!element?.closest('.view.is-active')) return;
+    if (!element?.closest('.view.is-active, dialog[open]')) return;
     const transform = direction ? 'translateX('+Math.sign(direction)*14+'px)' : 'translateY(6px)';
     play(element, [{opacity:.55,transform},{opacity:1,transform:'translate(0)'}],
       {duration:220}, element);
