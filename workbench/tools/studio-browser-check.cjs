@@ -17,16 +17,21 @@ const fixture={
  const browser=await chromium.launch({channel:'chrome',headless:true});
  try{
  const page=await browser.newPage({viewport:{width:1440,height:1000},deviceScaleFactor:1});
- const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const errors=[];
+ async function prepare(target,records=fixture){
+ const page=target;
+ page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/*', async route=>{
   const url=route.request().url();
   if(url.includes('cdn.jsdelivr.net')) return route.fulfill({contentType:'application/javascript',body:`window.WorkBuddyCloud={createWorkBuddyCloud:()=>({database:{from:table=>{let rows=window.fixture[table]||[];let patch=null;const q={select(){return q},order(){return q},limit(){return q},eq(key,value){rows=rows.filter(r=>r[key]===value);return q},update(p){patch=p;return q},then(resolve){if(patch)rows.forEach(r=>Object.assign(r,patch));return Promise.resolve({data:rows,error:null}).then(resolve)}};return q}},llm:{models:{list:async()=>[{id:'test-model',name:'测试模型',maxInputTokens:1000,maxOutputTokens:1000}]}}})};`});
   if(url.startsWith(origin+'/'))return route.continue();
   return route.abort();
  });
- await page.addInitScript(f=>{window.fixture=f},fixture);
+ await page.addInitScript(f=>{window.fixture=f},records);
  await page.goto(origin);
  await page.locator('#syncState.is-ok').waitFor({timeout:10000});
+ }
+ await prepare(page);
  assert.equal(await page.locator('#homeMaterialCount').textContent(),'8');
  await page.evaluate(()=>scrollTo({top:0,behavior:'instant'}));await page.screenshot({path:join(artifactDir,'home.png'),fullPage:true,animations:"disabled"});
  await page.locator('.node-top-left').click();
@@ -200,7 +205,130 @@ const fixture={
   }
  }
  assert.equal(await page.evaluate(()=>fixture.video_metrics.length),15,'Opening and canceling a form must not create records');
+ // Local motion must always reveal the latest state, including during interruption.
+ await page.setViewportSize({width:1440,height:1000});
+ await page.locator('.tab[data-view="home"]').click();
+ await page.locator('#homeToday').click();
+ const calendarMotion=await page.evaluate(()=>{
+  document.getElementById('homeNextWeek').click();
+  const items=document.getElementById('homeDayItems');
+  const forward=items.getAnimations()[0]?.effect.getKeyframes()[0].transform;
+  document.getElementById('homePrevWeek').click();
+  const backward=items.getAnimations()[0]?.effect.getKeyframes()[0].transform;
+  for(let i=0;i<5;i++){
+   document.getElementById('homeNextWeek').click();
+   document.getElementById('homePrevWeek').click();
+  }
+  return {forward,backward,running:items.getAnimations().length,selected:document.querySelector('.week-day.is-selected').dataset.calendarDay};
+ });
+ assert.equal(calendarMotion.forward,'translateX(14px)');
+ assert.equal(calendarMotion.backward,'translateX(-14px)');
+ assert.equal(calendarMotion.running,1);
+ assert.equal(calendarMotion.selected,dates.today);
+ await page.locator('.tab[data-view="scripts"]').click();
+ assert.equal(await page.locator('#homeDayItems').evaluate(el=>el.getAnimations().length),0);
+ const filteredMotion=await page.evaluate(()=>{
+  const input=document.getElementById('scriptSearch');
+  for(const value of ['聚光','','聚光']){input.value=value;input.dispatchEvent(new Event('input'));}
+  const list=document.getElementById('scriptList');
+  return {ids:[...list.children].map(el=>el.dataset.scriptId),animations:list.getAnimations({subtree:true}).length};
+ });
+ assert.deepEqual(filteredMotion.ids,['103']);
+ assert.ok(filteredMotion.animations<=1);
+ await page.locator('#scriptSearch').fill('');
+ // Native modal semantics: background inert, initial reading focus and return focus.
+ await page.locator('#scriptList [data-viewscript="101"]').click();
+ assert.equal(await page.locator('#modal').evaluate(el=>el.matches(':modal')),true);
+ assert.equal(await page.evaluate(()=>document.activeElement.id),'modalTitle');
+ assert.equal(await page.locator('#toastWrap').evaluate(el=>el.parentElement.id),'modal');
+ await page.evaluate(()=>document.querySelector('.tab[data-view="home"]').focus());
+ assert.equal(await page.evaluate(()=>document.activeElement.id),'modalTitle');
+ await page.keyboard.press('Tab');
+ assert.equal(await page.evaluate(()=>document.activeElement.id),'modalCopy');
+ await page.keyboard.press('Shift+Tab');
+ assert.equal(await page.evaluate(()=>document.getElementById('modal').contains(document.activeElement)),true);
+ await page.keyboard.press('Escape');
+ assert.equal(await page.locator('#modal').isVisible(),false);
+ assert.equal(await page.evaluate(()=>document.activeElement.dataset.viewscript),'101');
+ assert.equal(await page.locator('#toastWrap').evaluate(el=>el.parentElement.tagName),'BODY');
+ assert.equal(await page.locator('body').evaluate(el=>el.classList.contains('script-dialog-open')),false);
+ // Close during opening and reopen: no lingering dialog animation or stale focus.
+ const reopen=await page.evaluate(()=>{
+  const opener=document.querySelector('#scriptList [data-viewscript="101"]');
+  opener.focus();opener.click();
+  document.querySelector('#modal button[data-close]').click();
+  const stopped=document.getElementById('modal').getAnimations({subtree:true}).length;
+  opener.click();return {stopped,open:document.getElementById('modal').open};
+ });
+ assert.equal(reopen.stopped,0);assert.equal(reopen.open,true);
+ await page.emulateMedia({reducedMotion:'reduce'});
+ await page.waitForFunction(()=>document.getElementById('motionToggle').disabled);
+ assert.equal(await page.locator('#modal').evaluate(el=>el.getAnimations({subtree:true}).length),0);
+ await page.keyboard.press('Escape');
+ await page.locator('.tab[data-view="home"]').click();
+ await page.locator('#homeNextWeek').click();
+ assert.equal(await page.locator('#homeDayItems').evaluate(el=>el.getAnimations().length),0);
+ await page.locator('#homeToday').click();
+ await page.emulateMedia({reducedMotion:'no-preference'});
+ // Inline confirmations stay interactive in the modal; Escape cancels just the confirmation.
+ await page.locator('.tab[data-view="scripts"]').click();
+ await page.locator('#scriptList [data-viewscript="102"]').click();
+ await page.locator('#modalFix').click();
+ assert.equal(await page.locator('#modal .confirm-bar').isVisible(),true);
+ await page.keyboard.press('Escape');
+ assert.equal(await page.locator('#modal').isVisible(),true);
+ assert.equal(await page.locator('#modal .confirm-bar').count(),0);
+ assert.equal(await page.evaluate(()=>document.activeElement.id),'modalFix');
+ await page.locator('#modalFix').click();
+ await page.locator('#modal .confirm-bar [data-yes]').click();
+ await page.waitForFunction(()=>document.getElementById('modalFix').hidden);
+ assert.doesNotMatch(await page.locator('#modalBody').textContent(),/这是最好的美甲/);
+ assert.equal(await page.evaluate(()=>document.activeElement.id),'modalTitle');
+ assert.equal(await page.locator('#modal #toastWrap .toast').count()>0,true);
+ await page.keyboard.press('Escape');
+ // Long scripts remain readable with controls reachable on small screens.
+ await page.evaluate(()=>{fixture.scripts[0].content=('## 拍摄镜头与口播\n\n展示指尖的光泽、甲型与细节，记录真实的上手效果。\n\n').repeat(50)});
+ await page.locator('.tab[data-view="scripts"]').click();
+ await page.locator('#scriptList [data-viewscript="101"]').click();
+ await page.waitForFunction(()=>!document.querySelector('#toastWrap .toast'));
+ await page.screenshot({path:join(artifactDir,'script-dialog.png'),animations:'disabled'});
+ for(const width of [390,320]){
+  await page.setViewportSize({width,height:844});
+  assert.ok(await page.locator('#modal').evaluate(el=>el.scrollWidth<=innerWidth),'dialog overflow at '+width);
+  assert.ok(await page.locator('#modalBody').evaluate(el=>el.scrollHeight>el.clientHeight));
+  await page.locator('#modalBody').evaluate(el=>{el.scrollTop=el.scrollHeight});
+  assert.ok(await page.locator('#modal button[data-close]').evaluate(el=>el.getBoundingClientRect().bottom<=innerHeight));
+ }
+ await page.screenshot({path:join(artifactDir,'script-dialog-mobile.png'),animations:'disabled'});
+ await page.keyboard.press('Escape');
+ // A refreshed list replaces the original opener; focus returns to its replacement.
+ await page.setViewportSize({width:1440,height:1000});
+ await page.locator('#scriptList [data-viewscript="101"]').click();
+ await page.evaluate(()=>document.getElementById('scriptSearch').dispatchEvent(new Event('input')));
+ await page.keyboard.press('Escape');
+ assert.equal(await page.evaluate(()=>document.activeElement.dataset.viewscript),'101');
+ assert.equal(await page.evaluate(()=>document.activeElement.closest('#scriptList')?.id),'scriptList');
+ if(process.env.STUDIO_RECORD_DEMO==='1'){
+  const demo=await browser.newPage({viewport:{width:1440,height:1000},recordVideo:{dir:artifactDir,size:{width:1440,height:1000}}});
+  const demoRecords=await page.evaluate(()=>fixture);
+  demoRecords.scripts[0].content='## 秋日指尖，留一点温柔的琥珀色\n\n用真实上手效果，记录一束光里的秋天。\n\n### 00–03 秒 · 光落在指尖\n\n近景拍摄琥珀猫眼，手指轻轻转动，让光带自然移动。\n\n### 03–12 秒 · 看见细节\n\n切换侧面和俯拍角度，展示短甲的弧度与颜色层次。\n\n### 12–20 秒 · 回到日常\n\n手拿咖啡杯或翻动书页，让款式进入真实生活。\n\n### 发布文案\n\n换季想留一点温暖，从指尖开始。你喜欢偏透的琥珀色，还是更浓一点的焦糖色？';
+  await prepare(demo,demoRecords);
+  await demo.evaluate(()=>{document.querySelector('.studio-page-heading .eyebrow').textContent='交互演示 · 隔离示例数据'});
+  await demo.locator('.home-calendar').scrollIntoViewIfNeeded();
+  await demo.waitForTimeout(900);
+  await demo.locator('#homeNextWeek').click();await demo.waitForTimeout(750);
+  await demo.locator('#homePrevWeek').click();await demo.waitForTimeout(750);
+  await demo.locator('[data-calendar-day="'+dates.today+'"]').click();await demo.waitForTimeout(750);
+  await demo.locator('.tab[data-view="scripts"]').click();await demo.waitForTimeout(900);
+  await demo.locator('[data-script-status="unplanned"]').click();await demo.waitForTimeout(900);
+  await demo.locator('[data-script-status="all"]').click();await demo.waitForTimeout(900);
+  await demo.locator('#scriptList [data-viewscript="101"]').click();await demo.waitForTimeout(1100);
+  await demo.locator('#modalBody').evaluate(el=>el.scrollTo({top:320,behavior:'smooth'}));await demo.waitForTimeout(900);
+  await demo.keyboard.press('Escape');await demo.waitForTimeout(900);
+  const video=demo.video();await demo.close();
+  await video.saveAs(join(artifactDir,'interactions.webm'));await video.delete();
+ }
  assert.deepEqual(errors,[]);
- console.log('PASS: overview counts, search, selection, script handoff, video modes, filtered charts/ranking, empty states, 9 views × 5 widths, motion preference persistence, keyboard links, animation cancellation, rapid navigation, reduced motion; exact topic navigation, composed script filters, calendar navigation and linked forms, missing sources; no uncaught errors.');
+ console.log('PASS: overview counts, search, selection, script handoff, video modes, filtered charts/ranking, empty states, 9 views × 5 widths, motion preference persistence, keyboard links, animation cancellation, rapid navigation, reduced motion; exact topic navigation, composed script filters, calendar navigation and linked forms, missing sources, directional calendar motion, interrupted filters, native modal focus/inert background, immediate close/reopen, reduced dialog motion and long mobile scripts; no uncaught errors.');
  }finally{await browser.close()}
 })().catch(e=>{console.error(e);process.exitCode=1});
