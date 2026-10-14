@@ -494,6 +494,11 @@ const S = {
   loaded: false,
   loadError: false,
   search: '',
+  scriptQuery: '',
+  scriptAccount: '全部',
+  scriptStatus: 'all',
+  pendingOnly: false,
+  homeDay: StudioWorkflow.dayKey(),
   scripts: [],
   schedules: [],
   metrics: [],
@@ -1190,7 +1195,7 @@ function renderMaterials(){
     const sc = scriptForMaterial(m.id);
     const kws = String(m.keywords || '').split(/[,，]/).filter(Boolean);
     return '' +
-    '<article class="card' + (m.selected ? ' is-selected' : '') + (sc ? ' has-script' : '') + '">' +
+    '<article class="card' + (m.selected ? ' is-selected' : '') + (sc ? ' has-script' : '') + '" data-material-id="' + esc(m.id) + '" tabindex="-1">' +
       '<div class="card-top">' +
         '<span class="tag tag-account" data-k="' + esc(acc.key) + '">' + esc(m.account) + '</span>' +
         (m.content_form ? '<span class="tag tag-plain">' + esc(m.content_form) + '</span>' : '') +
@@ -1505,8 +1510,11 @@ function pendingMaterials(){
 }
 
 function renderPending(){
-  const list = pendingMaterials();
-  $('#pendingMeta').textContent = list.length ? ('共 ' + list.length + ' 条待制作') : '在素材库勾选后出现在这里';
+  const selected = pendingMaterials();
+  const remaining = selected.filter(m=>!scriptForMaterial(m.id));
+  const list = S.pendingOnly ? remaining : selected;
+  $('#pendingMeta').textContent = selected.length ? ('待写 ' + remaining.length + ' 条 · 已有脚本 ' + (selected.length-remaining.length) + ' 条') : '在选题库勾选后出现在这里';
+  $('#pendingEmpty').textContent = selected.length ? '选中的选题都已有脚本，可在右侧查看。' : '还没有勾选选题。';
   const box = $('#pendingList');
   if (!list.length){
     box.innerHTML = '';
@@ -1518,7 +1526,7 @@ function renderPending(){
     const acc = ACC_BY_NAME[m.account] || { key:'' };
     const sc = scriptForMaterial(m.id);
     const running = !!S.gen[m.id];
-    return '<div class="pending' + (sc ? ' is-done' : '') + '">' +
+    return '<div class="pending' + (sc ? ' is-done' : '') + '" data-pending-id="' + esc(m.id) + '" tabindex="-1">' +
       '<div class="card-top">' +
         '<span class="tag tag-account" data-k="' + esc(acc.key) + '">' + esc(m.account) + '</span>' +
         (m.content_form ? '<span class="tag tag-plain">' + esc(m.content_form) + '</span>' : '') +
@@ -1540,17 +1548,26 @@ function renderPending(){
 
 function renderScripts(){
   const box = $('#scriptList');
-  $('#scriptMeta').textContent = S.scripts.length ? ('共 ' + S.scripts.length + ' 支脚本') : '';
-  if (!S.scripts.length){
+  const rows = latestPlanRows();
+  const entries = S.scripts.map(script=>({script,scan:complianceScan(script.content),scheduled:StudioWorkflow.isScriptScheduled(script,rows)}));
+  const baseFilter = {query:S.scriptQuery,account:S.scriptAccount};
+  const list = StudioWorkflow.filterScripts(entries,{...baseFilter,status:S.scriptStatus});
+  const accountNames = [...new Set([...ACCOUNTS.map(a=>a.name),...S.scripts.map(s=>s.account)])].filter(Boolean);
+  const options = '<option value="全部">全部账号</option>' + accountNames.map(name=>'<option value="'+esc(name)+'">'+esc(name)+'</option>').join('');
+  if ($('#scriptAccount').innerHTML !== options) $('#scriptAccount').innerHTML = options;
+  $('#scriptAccount').value = S.scriptAccount;
+  $('#scriptStatusFilter').innerHTML = [['all','全部'],['unplanned','未排期'],['scheduled','已排期'],['review','需检查']].map(([key,label])=>'<button class="chip'+(S.scriptStatus===key?' is-active':'')+'" type="button" data-script-status="'+key+'" aria-pressed="'+(S.scriptStatus===key)+'">'+label+'<small>'+StudioWorkflow.filterScripts(entries,{...baseFilter,status:key}).length+'</small></button>').join('');
+  $('#scriptMeta').textContent = '显示 ' + list.length + ' / ' + S.scripts.length + ' 份';
+  $('#scriptEmpty').textContent = S.scripts.length ? '没有匹配的脚本，试试其他关键词、账号或状态。' : '还没有脚本。从左侧选题生成第一份。';
+  if (!list.length){
     box.innerHTML = '';
     $('#scriptEmpty').hidden = false;
     return;
   }
   $('#scriptEmpty').hidden = true;
-  box.innerHTML = S.scripts.map(s => {
+  box.innerHTML = list.map(({script:s,scan:live,scheduled}) => {
     const acc = ACC_BY_NAME[s.account] || { key:'' };
     /* 合规等级实时计算，避免与入库时的旧口径不一致 */
-    const live = complianceScan(s.content);
     const r = live.level;
     const rLabel = r === 'pass' ? '合规通过' : r === 'warn' ? '有风险提示' : r === 'block' ? '命中禁用词' : '未自检';
     const hits = live.hits.length ? live.hits.map(h => h.group + '：' + h.word).join('；') : '无';
@@ -1559,14 +1576,14 @@ function renderScripts(){
     const toneN = humanToneCount(tone);
     const toneBrief = humanToneBrief(tone);
     const when = s.created_at ? new Date(s.created_at) : null;
-    return '<article class="script-card">' +
+    return '<article class="script-card" data-script-id="' + esc(s.id) + '" tabindex="-1">' +
       '<div class="script-head">' +
         '<div>' +
           '<h4>' + esc(s.title) + '</h4>' +
           '<div class="meta">' + esc(s.account) + (s.duration ? ' · ' + esc(s.duration) : '') +
             (when ? ' · ' + (when.getMonth()+1) + '月' + when.getDate() + '日' : '') + '</div>' +
         '</div>' +
-        '<span class="risk risk-' + (r === 'pass' ? 'ok' : r === 'block' ? 'block' : 'warn') + '">' + rLabel + '</span>' +
+        '<div class="script-state-tags"><span class="tag tag-plain">' + (scheduled ? '当前已排期' : '当前未排期') + '</span><span class="risk risk-' + (r === 'pass' ? 'ok' : r === 'block' ? 'block' : 'warn') + '">' + rLabel + '</span></div>' +
       '</div>' +
       '<div class="script-preview">' + esc(String(s.content || '').replace(/[#*|]/g,'').slice(0, 260)) + '</div>' +
       '<div class="script-foot">' +
@@ -2676,6 +2693,7 @@ async function wipeData(key){
 const VIEW_LABELS = {home:'创作工作台',materials:'风口选题',scripts:'拍摄辅助',video:'视频制作',schedule:'自动排期',progress:'进度看板',data:'数据看板',profile:'店铺档案',admin:'数据管理'};
 function renderHome(){
   window.StudioMotion?.refresh('home');
+  renderHomeCalendar();
   const ready = S.loaded;
   const pending = S.materials.filter(m => m.selected && !scriptForMaterial(m.id));
   const planned = latestPlanRows();
@@ -2693,10 +2711,118 @@ function renderHome(){
     ['data','↗','已录入作品',S.metrics.length]
   ];
   $('#homeSummary').innerHTML = stats.map(([route,icon,label,value]) => '<button class="summary-item" data-route="'+route+'"><span class="summary-icon" aria-hidden="true">'+icon+'</span><span><small>'+label+'</small><strong>'+(ready ? value : '—')+'</strong></span><span aria-hidden="true">↗</span></button>').join('');
-  const tasks = pending.slice(0,3).map(m=>({title:m.title,account:m.account,kind:'待写脚本',route:'scripts'}));
+  const tasks = pending.slice(0,3).map(m=>({title:m.title,account:m.account,kind:'待写脚本',materialId:m.id}));
   if(tasks.length < 3) S.scripts.slice(0,3-tasks.length).forEach(s=>tasks.push({title:s.title,account:s.account,kind:'脚本已就绪',id:s.id}));
-  $('#homeNext').innerHTML = tasks.length ? tasks.map((t,i)=>'<div class="next-item"><span class="next-index">0'+(i+1)+'</span><div class="next-copy"><strong title="'+esc(t.title)+'">'+esc(t.title)+'</strong><small>'+esc(t.account)+' · '+t.kind+'</small></div><button class="btn btn-ghost btn-sm" '+(t.id ? 'data-makevideo="'+esc(t.id)+'"' : 'data-route="scripts"')+'>'+(t.id?'制作视频':'去写脚本')+' ↗</button></div>').join('') : '<div class="home-placeholder">'+(!ready ? (S.loadError ? '暂时无法读取创作记录，请刷新后重试。' : '正在读取你的选题和脚本…') : '还没有待办，从选一个喜欢的题目开始。<br><button class="btn btn-ghost btn-sm" data-route="materials">去发现灵感 ↗</button>')+'</div>';
+  $('#homeNext').innerHTML = tasks.length ? tasks.map((t,i)=>'<div class="next-item"><span class="next-index">0'+(i+1)+'</span><div class="next-copy"><strong title="'+esc(t.title)+'">'+esc(t.title)+'</strong><small>'+esc(t.account)+' · '+t.kind+'</small></div><button class="btn btn-ghost btn-sm" '+(t.id ? 'data-makevideo="'+esc(t.id)+'"' : 'data-focus-material="'+esc(t.materialId)+'"')+'>'+(t.id?'制作视频':'去写脚本')+' ↗</button></div>').join('') : '<div class="home-placeholder">'+(!ready ? (S.loadError ? '暂时无法读取创作记录，请刷新后重试。' : '正在读取你的选题和脚本…') : '还没有待办，从选一个喜欢的题目开始。<br><button class="btn btn-ghost btn-sm" data-route="materials">去发现灵感 ↗</button>')+'</div>';
   $('#homeAccounts').innerHTML = ACCOUNTS.map(a=>'<div class="channel-row"><span class="channel-avatar">'+esc(a.name.slice(0,1))+'</span><div class="channel-info">'+esc(a.name)+'<small>'+esc(a.platform)+' · 每周 '+esc(a.perWeek)+' 条</small></div><div class="channel-total">'+(ready ? S.scripts.filter(s=>s.account===a.name).length : '—')+' <small>份脚本</small></div></div>').join('');
+}
+
+function renderHomeCalendar(){
+  const days = StudioWorkflow.weekDays(S.homeDay);
+  const today = StudioWorkflow.dayKey();
+  const rows = latestPlanRows();
+  const weekRows = rows.filter(r=>days.includes(StudioWorkflow.dayKey(r.publish_at)));
+  const recorded = weekRows.filter(r=>StudioWorkflow.metricForSchedule(r,S.metrics)).length;
+  const shortDate = day=>Number(day.slice(5,7))+'月'+Number(day.slice(8))+'日';
+  $('#homeWeekMeta').textContent = shortDate(days[0])+' — '+shortDate(days[6])+(S.loaded ? ' · '+weekRows.length+' 条计划 / '+recorded+' 条已录入' : ' · '+(S.loadError?'排期暂未读取':'正在读取排期'));
+  $('#homeWeekDays').innerHTML = days.map((day,i)=>{
+    const count = StudioWorkflow.rowsOnDay(rows,day).length;
+    return '<button class="week-day'+(day===S.homeDay?' is-selected':'')+(day===today?' is-today':'')+'" type="button" data-calendar-day="'+day+'" aria-pressed="'+(day===S.homeDay)+'"'+(day===today?' aria-current="date"':'')+' aria-label="'+shortDate(day)+' '+WD[i]+'，'+(S.loaded?count+' 条发布计划':'排期尚未加载')+'"><span>'+WD[i]+'</span><strong>'+Number(day.slice(8))+'</strong><small>'+(S.loaded?(count?count+' 条计划':'—'):'…')+'</small></button>';
+  }).join('');
+  $('#homeDayLabel').textContent = (S.homeDay===today?'今天 · ':'')+shortDate(S.homeDay);
+  const list = StudioWorkflow.rowsOnDay(rows,S.homeDay);
+  $('#homeDayItems').innerHTML = !S.loaded
+    ? '<p class="calendar-empty">'+(S.loadError?'连接恢复后，这里会显示真实排期。':'正在读取你的发布计划…')+'</p>'
+    : list.length ? list.map(row=>{
+      const metric = StudioWorkflow.metricForSchedule(row,S.metrics);
+      const script = row.script_id!=null ? S.scripts.find(s=>StudioWorkflow.sameId(s.id,row.script_id)) : row.material_id!=null ? scriptForMaterial(row.material_id) : null;
+      const due = new Date(row.publish_at).getTime()<=Date.now();
+      const state = metric?'已录入数据':row.status==='published'?'已标记发布':due?'计划时间已到':'发布计划';
+      const time = new Date(row.publish_at).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hour12:false});
+      let action = script ? '<button class="btn btn-ghost btn-sm" data-open-script="'+esc(script.id)+'">看脚本</button>' : row.material_id!=null && S.materials.some(m=>StudioWorkflow.sameId(m.id,row.material_id)) ? '<button class="btn btn-ghost btn-sm" data-focus-material="'+esc(row.material_id)+'">查看选题</button>' : '<span class="hint">原选题或脚本已不可用</span>';
+      if(metric)action+='<button class="btn btn-ghost btn-sm" data-open-metric="'+esc(metric.id)+'">查看数据</button>';
+      else if(due)action+='<button class="btn btn-primary btn-sm" data-record-schedule="'+esc(row.id)+'">录入表现</button>';
+      return '<div class="calendar-item"><time datetime="'+esc(row.publish_at)+'">'+time+'</time><div class="calendar-item-copy"><strong>'+esc(row.title)+'</strong><small>'+esc(row.account)+' · <span class="'+(metric?'calendar-recorded':'')+'">'+state+'</span></small></div><div class="calendar-item-actions">'+action+'</div></div>';
+    }).join('') : '<p class="calendar-empty">这一天没有发布计划。<button class="text-button" data-route="schedule">去安排这一周 ↗</button></p>';
+}
+
+function focusWorkspaceItem(attribute,id){
+  requestAnimationFrame(()=>{
+    const element = $$('['+attribute+']').find(el=>el.getAttribute(attribute)===String(id));
+    if(!element)return;
+    $$('.is-targeted').forEach(el=>el.classList.remove('is-targeted'));
+    element.classList.add('is-targeted');
+    element.focus({preventScroll:true});
+    element.scrollIntoView({block:'center',behavior:window.StudioMotion?.enabled()?'smooth':'instant'});
+  });
+}
+
+function openMaterialWorkspace(id){
+  const material = S.materials.find(m=>StudioWorkflow.sameId(m.id,id));
+  if(!material){toast('这条选题已不可用，请重新读取数据。','warn');return;}
+  if(material.selected){
+    S.pendingOnly=false;$('#pendingOnly').checked=false;renderPending();
+    switchView('scripts');focusWorkspaceItem('data-pending-id',material.id);
+  }else{
+    S.search='';S.filter='全部';S.onlyLatest=false;
+    $('#materialSearch').value='';$('#onlyLatest').checked=false;
+    renderFilter();renderMaterials();switchView('materials');focusWorkspaceItem('data-material-id',material.id);
+  }
+}
+
+function applyScheduleToMetric(row){
+  if(!Array.from($('#mAccount').options).some(option=>option.value===row.account)){
+    const option=document.createElement('option');option.value=row.account;option.textContent=row.account;$('#mAccount').appendChild(option);
+  }
+  $('#mAccount').value=row.account;
+  $('#mPlatform').value=row.platform || $('#mPlatform').value;
+  $('#mTitle').value=row.title || '';
+  const day=StudioWorkflow.dayKey(row.publish_at);
+  if(day)$('#mDate').value=day;
+}
+
+function bindStudioWorkflow(){
+  $('#scriptSearch').addEventListener('input',event=>{S.scriptQuery=event.target.value;renderScripts();});
+  $('#scriptAccount').addEventListener('change',event=>{S.scriptAccount=event.target.value;renderScripts();});
+  $('#scriptStatusFilter').addEventListener('click',event=>{
+    const button=event.target.closest('[data-script-status]');if(!button)return;
+    S.scriptStatus=button.dataset.scriptStatus;renderScripts();
+    $$('[data-script-status]').find(el=>el.dataset.scriptStatus===S.scriptStatus)?.focus({preventScroll:true});
+  });
+  $('#pendingOnly').addEventListener('change',event=>{S.pendingOnly=event.target.checked;renderPending();});
+  $('#homePrevWeek').addEventListener('click',()=>{S.homeDay=StudioWorkflow.shiftDay(S.homeDay,-7);renderHomeCalendar();});
+  $('#homeNextWeek').addEventListener('click',()=>{S.homeDay=StudioWorkflow.shiftDay(S.homeDay,7);renderHomeCalendar();});
+  $('#homeToday').addEventListener('click',()=>{S.homeDay=StudioWorkflow.dayKey();renderHomeCalendar();});
+  $('#homeWeekDays').addEventListener('click',event=>{
+    const button=event.target.closest('[data-calendar-day]');if(!button)return;
+    S.homeDay=button.dataset.calendarDay;renderHomeCalendar();
+    $$('[data-calendar-day]').find(el=>el.dataset.calendarDay===S.homeDay)?.focus({preventScroll:true});
+  });
+  document.addEventListener('click',event=>{
+    const material=event.target.closest('[data-focus-material]');
+    if(material){openMaterialWorkspace(material.dataset.focusMaterial);return;}
+    const scriptButton=event.target.closest('[data-open-script]');
+    if(scriptButton){
+      const script=S.scripts.find(s=>StudioWorkflow.sameId(s.id,scriptButton.dataset.openScript));
+      if(script){openScript(script.id);$('#modalCopy').focus();}
+      return;
+    }
+    const metricButton=event.target.closest('[data-open-metric]');
+    if(metricButton){
+      const metric=S.metrics.find(m=>StudioWorkflow.sameId(m.id,metricButton.dataset.openMetric));
+      if(metric){switchView('data');openMetricForm(metric.id);$('#mTitle').focus();}
+      return;
+    }
+    const scheduleButton=event.target.closest('[data-record-schedule]');
+    if(scheduleButton){
+      const row=latestPlanRows().find(r=>StudioWorkflow.sameId(r.id,scheduleButton.dataset.recordSchedule));
+      if(!row)return;
+      const existing=StudioWorkflow.metricForSchedule(row,S.metrics);
+      switchView('data');openMetricForm(existing?existing.id:null);
+      if(!existing){$('#mSchedule').value=String(row.id);applyScheduleToMetric(row);}
+      $('#mTitle').focus();
+    }
+  });
 }
 
 function renderDataVisuals(list, average){
@@ -2738,6 +2864,7 @@ function bind(){
     if(route){ switchView(route.dataset.route); $('#views').focus({preventScroll:true}); }
   });
   $('#materialSearch').addEventListener('input', e => { S.search = e.target.value; renderMaterials(); });
+  bindStudioWorkflow();
 
   $('#tabs').addEventListener('click', e => {
     const t = e.target.closest('.tab'); if (t) switchView(t.dataset.view);
@@ -2809,6 +2936,7 @@ function bind(){
     try{
       await Promise.all([dbLoadMaterials(), dbLoadScripts(), dbLoadSchedules(), dbLoadMetrics(),
                          dbLatestTrend(), dbLoadProfile()]);
+      S.loaded = true; S.loadError = false;
       renderAll();
       setSync('已同步', 'is-ok');
       toast('已重新读取云端数据', 'ok');
@@ -2848,13 +2976,7 @@ function bind(){
   $('#mSchedule').addEventListener('change', e => {
     const r = latestPlanRows().find(x => String(x.id) === e.target.value);
     if (!r) return;
-    $('#mAccount').value = r.account;
-    $('#mPlatform').value = r.platform || $('#mPlatform').value;
-    $('#mTitle').value = r.title || '';
-    if (r.publish_at){
-      const d = new Date(r.publish_at);
-      if (!isNaN(d.getTime())) $('#mDate').value = ymd(d);
-    }
+    applyScheduleToMetric(r);
   });
   $('#dataTable').addEventListener('click', e => {
     const ed = e.target.closest('[data-editmetric]');

@@ -111,7 +111,96 @@ const fixture={
  assert.equal(await page.locator('#jyModeGenerate').getAttribute('aria-pressed'),'true');
  await page.locator('#jyModeEdit').click();
  assert.equal(await page.locator('#jyModeEdit').getAttribute('aria-pressed'),'true');
+ // Workflow acceptance uses isolated records with explicit links and missing sources.
+ await page.locator('.tab[data-view="home"]').click();
+ await page.locator('#homeNext [data-focus-material="2"]').click();
+ await page.waitForFunction(()=>document.activeElement?.dataset.pendingId==='2');
+ assert.equal(await page.locator('#view-scripts').isVisible(),true);
+ await page.locator('#pendingOnly').check();
+ assert.equal(await page.locator('[data-pending-id="1"]').count(),0);
+ await page.locator('#pendingOnly').uncheck();
+ const dates=await page.evaluate(()=>{
+  const today=StudioWorkflow.dayKey(), yesterday=StudioWorkflow.shiftDay(today,-1);
+  fixture.scripts.push(
+   {id:102,material_id:2,account:'小红书官方号',title:'法式拍摄清单',content:'这是最好的美甲',created_at:today},
+   {id:103,material_id:3,account:'老板IP号',title:'店主日记',content:'聚光下的日常细节',created_at:today});
+  fixture.materials[3].batch_id='old-batch';
+  fixture.schedules.splice(0,fixture.schedules.length,
+   {id:201,script_id:101,material_id:1,account:'抖音官方号',platform:'抖音',title:'已发布的琥珀作品',plan_batch:'p2',publish_at:yesterday+'T09:00:00+08:00'},
+   {id:204,material_id:4,account:'店铺日常号',platform:'小红书',title:'收店后的灯光与作品细节',plan_batch:'p2',publish_at:yesterday+'T18:00:00+08:00'},
+   {id:202,script_id:102,material_id:2,account:'小红书官方号',platform:'小红书',title:'今天的法式拍摄清单',plan_batch:'p2',publish_at:today+'T15:00:00+08:00'},
+   {id:203,script_id:999,material_id:999,account:'抖音官方号',title:'已删除来源的排期',plan_batch:'p2',publish_at:today+'T17:00:00+08:00'},
+   {id:205,account:'抖音官方号',title:'缺少日期的排期',plan_batch:'p2'});
+  fixture.video_metrics.push({id:501,schedule_id:201,account:'抖音官方号',platform:'抖音',title:'已录入的琥珀作品',publish_date:yesterday,views:1200});
+  return {today,yesterday};
+ });
+ await page.locator('.tab[data-view="admin"]').click();
+ await page.locator('#btnReloadAll2').click();
+ await page.locator('#syncState.is-ok').waitFor();
+ await page.locator('.tab[data-view="scripts"]').click();
+ assert.equal(await page.locator('[data-script-id]').count(),3);
+ await page.locator('[data-script-status="scheduled"]').click();
+ assert.equal(await page.locator('[data-script-id]').count(),2);
+ await page.locator('[data-script-status="unplanned"]').click();
+ assert.equal(await page.locator('[data-script-id="103"]').count(),1);
+ await page.locator('[data-script-status="review"]').click();
+ assert.equal(await page.locator('[data-script-id="102"]').count(),1);
+ await page.locator('[data-script-status="all"]').click();
+ await page.locator('#scriptSearch').fill('聚光');
+ assert.equal(await page.locator('[data-script-id="103"]').count(),1);
+ await page.locator('#scriptAccount').selectOption('小红书官方号');
+ assert.equal(await page.locator('[data-script-id]').count(),0);
+ await page.locator('#scriptSearch').fill('');
+ assert.equal(await page.locator('[data-script-id="102"]').count(),1);
+ await page.locator('#scriptAccount').selectOption('全部');
+ await page.evaluate(()=>scrollTo({top:0,behavior:'instant'}));
+ await page.screenshot({path:join(artifactDir,'scripts-workflow.png'),fullPage:true,animations:'disabled'});
+ await page.locator('.tab[data-view="home"]').click();
+ assert.equal(await page.locator('[data-calendar-day]').count(),7);
+ assert.equal(await page.locator('#homeDayItems .calendar-item').count(),2);
+ assert.match(await page.locator('#homeDayItems').textContent(),/原选题或脚本已不可用/);
+ assert.doesNotMatch(await page.locator('#homeDayItems').textContent(),/缺少日期/);
+ await page.locator('[data-open-script="102"]').click();
+ assert.match(await page.locator('#modalBody').textContent(),/最好的美甲/);
+ await page.locator('#modal button[data-close]').click();
+ await page.locator('#homeNextWeek').click();
+ assert.equal(await page.locator('#homeDayItems .calendar-item').count(),0);
+ await page.locator('#homePrevWeek').click();
+ assert.equal(await page.locator('#homeDayItems .calendar-item').count(),2);
+ await page.locator('#homeToday').click();
+ if(!await page.locator('[data-calendar-day="'+dates.yesterday+'"]').count()) await page.locator('#homePrevWeek').click();
+ await page.locator('[data-calendar-day="'+dates.yesterday+'"]').click();
+ assert.equal(await page.locator('#homeDayItems .calendar-item').count(),2);
+ assert.match(await page.locator('#homeDayItems .calendar-item').first().textContent(),/已录入数据/);
+ await page.locator('[data-open-metric="501"]').click();
+ assert.equal(await page.locator('#mTitle').inputValue(),'已录入的琥珀作品');
+ assert.match(await page.locator('#metricFormHint').textContent(),/编辑已有记录/);
+ await page.locator('#btnCancelMetric').click();
+ await page.locator('.tab[data-view="home"]').click();
+ await page.locator('[data-record-schedule="204"]').click();
+ assert.equal(await page.locator('#mSchedule').inputValue(),'204');
+ assert.equal(await page.locator('#mTitle').inputValue(),'收店后的灯光与作品细节');
+ assert.equal(await page.locator('#mAccount').inputValue(),'店铺日常号');
+ assert.equal(await page.locator('#mPlatform').inputValue(),'小红书');
+ assert.equal(await page.locator('#mDate').inputValue(),dates.yesterday);
+ await page.locator('#btnCancelMetric').click();
+ await page.locator('.tab[data-view="home"]').click();
+ await page.locator('#homeDayItems [data-focus-material="4"]').click();
+ await page.waitForFunction(()=>document.activeElement?.dataset.materialId==='4');
+ assert.equal(await page.locator('#onlyLatest').isChecked(),false);
+ assert.equal(await page.locator('[data-pick="4"]').getAttribute('aria-pressed'),'false');
+ await page.locator('.tab[data-view="home"]').click();
+ await page.evaluate(()=>scrollTo({top:0,behavior:'instant'}));
+ await page.screenshot({path:join(artifactDir,'home-workflow.png'),fullPage:true,animations:'disabled'});
+ for(const width of [1440,768,390,320]){
+  await page.setViewportSize({width,height:900});
+  for(const view of ['home','scripts']){
+   await page.locator('.tab[data-view="'+view+'"]').click();
+   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),view+' workflow overflow at '+width);
+  }
+ }
+ assert.equal(await page.evaluate(()=>fixture.video_metrics.length),15,'Opening and canceling a form must not create records');
  assert.deepEqual(errors,[]);
- console.log('PASS: overview counts, search, selection, script handoff, video modes, filtered charts/ranking, empty states, 9 views × 5 widths, motion preference persistence, keyboard links, animation cancellation, rapid navigation, reduced motion; no uncaught errors.');
+ console.log('PASS: overview counts, search, selection, script handoff, video modes, filtered charts/ranking, empty states, 9 views × 5 widths, motion preference persistence, keyboard links, animation cancellation, rapid navigation, reduced motion; exact topic navigation, composed script filters, calendar navigation and linked forms, missing sources; no uncaught errors.');
  }finally{await browser.close()}
 })().catch(e=>{console.error(e);process.exitCode=1});

@@ -113,6 +113,12 @@
       <div class="stage-footer"><span><i></i>灵感与作品，相互连接</span><button data-route="data">让数据带来下一个灵感 ↗</button></div>
     </div>
     <div class="studio-summary" id="homeSummary" aria-label="创作概览"></div>
+    <section class="panel home-calendar" aria-label="本周发布日历">
+      <div class="panel-head"><div><p class="eyebrow">YOUR PUBLISHING WEEK</p><h3>把这一周，安排得从容一点</h3><p class="hint" id="homeWeekMeta">正在读取排期…</p></div><div class="calendar-nav"><button class="btn btn-ghost btn-sm" id="homePrevWeek" aria-label="上一周">←</button><button class="btn btn-ghost btn-sm" id="homeToday">回到本周</button><button class="btn btn-ghost btn-sm" id="homeNextWeek" aria-label="下一周">→</button></div></div>
+      <div class="week-strip" id="homeWeekDays" role="group" aria-label="选择日期"></div>
+      <div class="calendar-day-heading"><h4 id="homeDayLabel"></h4><button class="text-button" data-route="schedule">完整排期 ↗</button></div>
+      <div id="homeDayItems"></div>
+    </section>
     <div class="home-bottom-grid">
       <section class="panel next-panel"><div class="panel-head"><div><p class="eyebrow">UP NEXT</p><h3>接着上次的灵感</h3></div><button class="text-button" data-route="scripts">全部脚本 ↗</button></div><div id="homeNext"></div></section>
       <section class="panel account-panel"><div class="panel-head"><div><p class="eyebrow">YOUR CHANNELS</p><h3>账号矩阵</h3></div><button class="text-button" data-route="profile">管理 ↗</button></div><div id="homeAccounts"></div></section>
@@ -189,15 +195,17 @@
 
   <!-- ============ ② 拍摄辅助 ============ -->
   <section class="view" id="view-scripts">
-    <div class="split">
+    <div class="studio-page-heading"><div><p class="eyebrow">FROM IDEA TO STORY</p><h2>把灵感，写成可以开拍的故事<span class="title-dot">.</span></h2><p>选题在左手，脚本在右手。找到它，接着做。</p></div><button class="btn btn-ghost" data-route="materials">＋ 继续选题</button></div>
+    <div class="split script-workspace">
       <aside class="col-left">
         <div class="panel-head">
           <div>
-            <h2>待制作素材</h2>
+            <h2>选中的选题</h2>
             <p class="hint" id="pendingMeta">在素材库勾选后出现在这里</p>
           </div>
           <button class="btn btn-primary btn-sm" id="btnGenAll">一键生成全部</button>
         </div>
+        <label class="switch pending-toggle"><input type="checkbox" id="pendingOnly" />仅看还没写脚本的选题</label>
         <div class="pending-list" id="pendingList"></div>
         <div class="empty" id="pendingEmpty" hidden>还没有勾选素材。</div>
       </aside>
@@ -207,6 +215,9 @@
           <h2>脚本库</h2>
           <span class="hint" id="scriptMeta"></span>
         </div>
+        <div class="script-tools"><label class="studio-search"><span aria-hidden="true">⌕</span><input type="search" id="scriptSearch" placeholder="搜索标题、正文或账号" aria-label="搜索脚本" /></label><label class="script-account-field"><span>账号</span><select id="scriptAccount" aria-label="筛选脚本账号"><option value="全部">全部账号</option></select></label></div>
+        <div class="chips script-status-filter" id="scriptStatusFilter" role="group" aria-label="筛选脚本状态"></div>
+        <p class="script-scope-note">排期状态以当前批次为准；已排期不代表视频已制作完成。</p>
         <div class="script-list" id="scriptList"></div>
         <div class="empty" id="scriptEmpty" hidden>还没有生成脚本。</div>
       </div>
@@ -582,6 +593,7 @@ node start-jianying.cjs</code></pre>
 <script src="./humanizer-policy.js"></script>
 <script src="./account-strategy.js"></script>
 <script src="./studio-motion.js"></script>
+<script src="./studio-workflow.js"></script>
 <script src="./app.js"></script>
 <script src="./account-settings.js"></script>
 <script src="./jy-catalog.js"></script>
