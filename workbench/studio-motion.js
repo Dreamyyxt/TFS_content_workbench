@@ -14,6 +14,9 @@
   let preference = true;
   let activeView = 'home';
   let hoveredRoute = '';
+  let inputMode = 'keyboard';
+  let linkedRoute = '';
+  let aimAngle = -90;
   let tiltFrame = 0;
   let tiltPoint = null;
   try { preference = localStorage.getItem(storageKey) !== 'off'; } catch (_) {}
@@ -143,10 +146,36 @@
     core?.style.removeProperty('--core-ry');
   }
 
+  const moduleLabels = {
+    materials:['风口选题','DISCOVER'], scripts:['拍摄辅助','CREATE'],
+    video:['视频制作','PRODUCE'], schedule:['发布日历','PUBLISH']
+  };
+
+  function aim(route) {
+    const node = network?.querySelector('.network-node[data-route="'+route+'"] .node-orb');
+    const center = core?.getBoundingClientRect();
+    if (!node || !center?.width) return;
+    const target = node.getBoundingClientRect();
+    const dx = target.left+target.width/2-center.left-center.width/2;
+    const dy = target.top+target.height/2-center.top-center.height/2;
+    const length = Math.hypot(dx,dy) || 1;
+    const angle = Math.atan2(dy,dx)*180/Math.PI;
+    // Unwrap the angle so switching between left-hand nodes takes the short arc.
+    aimAngle += ((angle-aimAngle+180)%360+360)%360-180;
+    core.style.setProperty('--aim-angle',aimAngle.toFixed(2)+'deg');
+    core.style.setProperty('--aim-rx',(-dy/length*3).toFixed(2)+'deg');
+    core.style.setProperty('--aim-ry',(dx/length*4).toFixed(2)+'deg');
+    core.style.setProperty('--orb-x',(dx/length*4).toFixed(2)+'px');
+    core.style.setProperty('--orb-y',(dy/length*4).toFixed(2)+'px');
+    core.style.setProperty('--light-x',(dx/length*19).toFixed(2)+'px');
+    core.style.setProperty('--light-y',(dy/length*19).toFixed(2)+'px');
+  }
+
   function highlight() {
     const focused = network?.contains(document.activeElement)
-      ? document.activeElement.closest('[data-route]')?.dataset.route : '';
-    const route = activeView === 'home' ? focused || hoveredRoute : '';
+      ? document.activeElement.closest('.network-node[data-route]')?.dataset.route : '';
+    const intended = inputMode==='pointer' ? hoveredRoute || focused : focused || hoveredRoute;
+    const route = activeView === 'home' ? intended || '' : '';
     network?.querySelectorAll('[data-network-route]').forEach(path => {
       path.classList.toggle('is-linked', path.dataset.networkRoute === route);
     });
@@ -154,6 +183,18 @@
       node.classList.toggle('is-linked', node.dataset.route === route);
     });
     core?.classList.toggle('is-linked', !!route);
+    if(core)core.dataset.module=route;
+    if(route)aim(route);
+    else if(core){
+      for(const property of ['--aim-rx','--aim-ry','--orb-x','--orb-y','--light-x','--light-y'])core.style.removeProperty(property);
+    }
+    if(route!==linkedRoute){
+      linkedRoute=route;
+      const title=document.getElementById('coreModuleLabel');
+      const subtitle=document.getElementById('coreModuleSub');
+      if(title)title.textContent=moduleLabels[route]?.[0] || '灵感，在这里生长';
+      if(subtitle)subtitle.textContent=moduleLabels[route]?.[1] || 'CONTENT STUDIO';
+    }
   }
 
   function sync() {
@@ -202,11 +243,19 @@
 
   network?.addEventListener('pointerover', event => {
     if (event.pointerType !== 'mouse') return;
-    hoveredRoute = event.target.closest('.network-node')?.dataset.route || '';
-    highlight();
+    const route = event.target.closest('.network-node')?.dataset.route;
+    if(!route)return;
+    inputMode='pointer';hoveredRoute=route;highlight();
   });
   network?.addEventListener('pointerleave', () => { hoveredRoute = ''; resetTilt(); highlight(); });
-  network?.addEventListener('focusin', highlight);
+  network?.addEventListener('focusin', event => {
+    if(event.target.matches(':focus-visible'))inputMode='keyboard';
+    highlight();
+  });
+  network?.addEventListener('keydown', event => {
+    if(event.key==='Tab'){inputMode='keyboard';highlight();}
+  });
+  if(network && typeof ResizeObserver==='function')new ResizeObserver(()=>{if(linkedRoute && activeView==='home')aim(linkedRoute)}).observe(network);
   network?.addEventListener('focusout', () => queueMicrotask(highlight));
   network?.addEventListener('pointermove', event => {
     if (!enabled() || activeView !== 'home' || !pointer.matches || event.pointerType !== 'mouse') return;
