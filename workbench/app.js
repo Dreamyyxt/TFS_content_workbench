@@ -192,9 +192,14 @@ function setSync(text, cls){
    不使用原生 confirm()：工作台常在内置预览面板（iframe）里打开，
    原生弹窗会被静默拦截并直接返回 false，表现为「点了没反应」。 */
 function askConfirm(message, okLabel){
+  const host = $('#modal').open ? $('#modal') : document.body;
+  if (host.querySelector('.confirm-bar')) return Promise.resolve(false);
+  const returnFocus = document.activeElement;
   return new Promise(resolve => {
     const wrap = document.createElement('div');
     wrap.className = 'confirm-bar';
+    wrap.setAttribute('role','alertdialog');
+    wrap.setAttribute('aria-label',message);
     wrap.innerHTML =
       '<div class="cb-text">' + esc(message) + '</div>' +
       '<span style="flex:1"></span>' +
@@ -203,15 +208,17 @@ function askConfirm(message, okLabel){
     const done = v => {
       wrap.remove();
       document.removeEventListener('keydown', onKey);
+      if(returnFocus?.isConnected && returnFocus.getClientRects().length) returnFocus.focus({preventScroll:true});
       resolve(v);
     };
-    const onKey = e => { if (e.key === 'Escape') done(false); };
+    const onKey = e => { if (e.key === 'Escape'){ e.preventDefault();done(false); } };
     wrap.addEventListener('click', e => {
       if (e.target.closest('[data-yes]')) done(true);
       else if (e.target.closest('[data-no]')) done(false);
     });
     document.addEventListener('keydown', onKey);
-    document.body.appendChild(wrap);
+    host.appendChild(wrap);
+    wrap.querySelector('[data-no]').focus({preventScroll:true});
     setTimeout(() => wrap.classList.add('is-in'), 10);
   });
 }
@@ -1548,6 +1555,7 @@ function renderPending(){
 
 function renderScripts(){
   const box = $('#scriptList');
+  const previous = window.StudioMotion?.snapshot(box);
   const rows = latestPlanRows();
   const entries = S.scripts.map(script=>({script,scan:complianceScan(script.content),scheduled:StudioWorkflow.isScriptScheduled(script,rows)}));
   const baseFilter = {query:S.scriptQuery,account:S.scriptAccount};
@@ -1562,6 +1570,7 @@ function renderScripts(){
   if (!list.length){
     box.innerHTML = '';
     $('#scriptEmpty').hidden = false;
+    window.StudioMotion?.region($('#scriptEmpty'));
     return;
   }
   $('#scriptEmpty').hidden = true;
@@ -1599,6 +1608,7 @@ function renderScripts(){
       '</div>' +
     '</article>';
   }).join('');
+  window.StudioMotion?.settle(box,previous);
 }
 
 async function delScript(id){
@@ -1856,7 +1866,9 @@ async function generateAll(){
   $('#btnGenAll').disabled = false;
 }
 
-/* 查看脚本弹窗 */
+/* 查看脚本弹窗：原生 dialog 管理模态焦点，关闭不等待动效。 */
+let scriptReturnFocus = null;
+let scriptReturnScope = null;
 function openScript(id){
   const s = S.scripts.find(x => x.id === id);
   if (!s) return;
@@ -1876,7 +1888,6 @@ function openScript(id){
     '自检范围：脚本正文 + 发布配置；脚本末尾自带的「合规提示」段落已自动排除' +
     '（那一节本身就是在列举反面词例，不该算命中）。下面是本地词库判断，不等于平台官方审核。</p>';
   $('#modalBody').innerHTML = banner + note + mdToHtml(s.content);
-  $('#modal').hidden = false;
   $('#modal').dataset.raw = s.content;
   S.modalScriptId = id;
   const fixBtn = $('#modalFix');
@@ -1884,6 +1895,41 @@ function openScript(id){
     fixBtn.hidden = !scan.hits.length;
     fixBtn.dataset.fixscript = String(id);
   }
+  const modal = $('#modal');
+  if (!modal.open){
+    scriptReturnFocus = document.activeElement;
+    scriptReturnScope = scriptReturnFocus.closest('#pendingList, #scriptList, #homeDayItems')?.id;
+    modal.hidden = false;
+    modal.appendChild($('#toastWrap'));
+    modal.showModal();
+    document.body.classList.add('script-dialog-open');
+    $('#modalTitle').focus({preventScroll:true});
+    $('#modalBody').scrollTop = 0;
+    window.StudioMotion?.dialog(modal,true);
+  }else if (!modal.contains(document.activeElement) || !document.activeElement.getClientRects().length){
+    $('#modalTitle').focus({preventScroll:true});
+  }
+}
+
+function closeScript(){
+  const modal = $('#modal');
+  if (!modal.open) return;
+  modal.querySelector('.confirm-bar [data-no]')?.click();
+  window.StudioMotion?.dialog(modal,false);
+  modal.close();
+  modal.hidden = true;
+  modal.before($('#toastWrap'));
+  document.body.classList.remove('script-dialog-open');
+  const id = S.modalScriptId;
+  S.modalScriptId = null;
+  const returnScope = document.getElementById(scriptReturnScope);
+  const fallback = [...(returnScope?.querySelectorAll('[data-viewscript], [data-open-script]') || [])]
+    .filter(button=>button.getClientRects().length).find(button=>StudioWorkflow.sameId(button.dataset.viewscript || button.dataset.openScript,id));
+  const target = scriptReturnFocus?.isConnected && scriptReturnFocus.getClientRects().length
+    ? scriptReturnFocus : fallback || $('#views');
+  target.focus({preventScroll:true});
+  scriptReturnFocus = null;
+  scriptReturnScope = null;
 }
 
 /* ---------------------------------------------------------------------
@@ -2790,12 +2836,20 @@ function bindStudioWorkflow(){
     $$('[data-script-status]').find(el=>el.dataset.scriptStatus===S.scriptStatus)?.focus({preventScroll:true});
   });
   $('#pendingOnly').addEventListener('change',event=>{S.pendingOnly=event.target.checked;renderPending();});
-  $('#homePrevWeek').addEventListener('click',()=>{S.homeDay=StudioWorkflow.shiftDay(S.homeDay,-7);renderHomeCalendar();});
-  $('#homeNextWeek').addEventListener('click',()=>{S.homeDay=StudioWorkflow.shiftDay(S.homeDay,7);renderHomeCalendar();});
-  $('#homeToday').addEventListener('click',()=>{S.homeDay=StudioWorkflow.dayKey();renderHomeCalendar();});
+  const selectDay = day=>{
+    if(day===S.homeDay)return;
+    const direction=day>S.homeDay?1:-1;
+    const changedWeek=StudioWorkflow.weekDays(day)[0]!==StudioWorkflow.weekDays(S.homeDay)[0];
+    S.homeDay=day;renderHomeCalendar();
+    if(changedWeek)window.StudioMotion?.region($('#homeWeekDays'),direction);
+    window.StudioMotion?.region($('#homeDayItems'),direction);
+  };
+  $('#homePrevWeek').addEventListener('click',()=>selectDay(StudioWorkflow.shiftDay(S.homeDay,-7)));
+  $('#homeNextWeek').addEventListener('click',()=>selectDay(StudioWorkflow.shiftDay(S.homeDay,7)));
+  $('#homeToday').addEventListener('click',()=>selectDay(StudioWorkflow.dayKey()));
   $('#homeWeekDays').addEventListener('click',event=>{
     const button=event.target.closest('[data-calendar-day]');if(!button)return;
-    S.homeDay=button.dataset.calendarDay;renderHomeCalendar();
+    selectDay(button.dataset.calendarDay);
     $$('[data-calendar-day]').find(el=>el.dataset.calendarDay===S.homeDay)?.focus({preventScroll:true});
   });
   document.addEventListener('click',event=>{
@@ -2804,7 +2858,7 @@ function bindStudioWorkflow(){
     const scriptButton=event.target.closest('[data-open-script]');
     if(scriptButton){
       const script=S.scripts.find(s=>StudioWorkflow.sameId(s.id,scriptButton.dataset.openScript));
-      if(script){openScript(script.id);$('#modalCopy').focus();}
+      if(script)openScript(script.id);
       return;
     }
     const metricButton=event.target.closest('[data-open-metric]');
@@ -3036,10 +3090,25 @@ function bind(){
   $('#btnAutoSchedule').addEventListener('click', runAutoSchedule);
 
   $('#modal').addEventListener('click', e => {
-    if (e.target.closest('[data-close]')){ $('#modal').hidden = true; S.modalScriptId = null; }
+    if (e.target.closest('[data-close]')) closeScript();
   });
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape'){ $('#modal').hidden = true; S.modalScriptId = null; }
+  $('#modal').addEventListener('cancel', e => {
+    e.preventDefault();
+    const cancel = $('#modal .confirm-bar [data-no]');
+    if(cancel)cancel.click();else closeScript();
+  });
+  $('#modal').addEventListener('keydown', e => {
+    if (e.key !== 'Tab') return;
+    const scope = $('#modal .confirm-bar') || $('#modal');
+    const controls = [...scope.querySelectorAll('button, a[href], input, select, textarea, [tabindex]')]
+      .filter(el=>!el.disabled && el.tabIndex>=0 && el.getClientRects().length);
+    const first = controls[0], last = controls[controls.length-1];
+    if (!first) return;
+    if (e.shiftKey && (document.activeElement===first || !controls.includes(document.activeElement))){
+      e.preventDefault();last.focus();
+    }else if (!e.shiftKey && document.activeElement===last){
+      e.preventDefault();first.focus();
+    }
   });
   if ($('#modalFix')) $('#modalFix').addEventListener('click', e => {
     const id = Number(e.target.closest('#modalFix').dataset.fixscript);

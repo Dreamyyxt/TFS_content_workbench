@@ -68,7 +68,7 @@
       stop(root);
       if (view === 'home') {
         reveal(root.querySelectorAll(entrance
-          ? '.stage-intro, .creative-network, .summary-item, .home-bottom-grid > .panel'
+          ? '.stage-intro, .creative-network, .summary-item, .home-calendar, .home-bottom-grid > .panel'
           : '.summary-item, .next-item'), root);
       } else if (view === 'materials') {
         reveal(root.querySelectorAll('#materialGrid > .card'), root);
@@ -81,6 +81,43 @@
       if (entrance) play(root.querySelector('.studio-page-heading'), [{opacity:0},{opacity:1}], {duration:250}, root);
     });
     frames.set(view, frame);
+  }
+
+  // Local updates own their animations so rapid input cannot queue stale transitions.
+  function region(element, direction = 0) {
+    stop(element);
+    if (!element?.closest('.view.is-active')) return;
+    const transform = direction ? 'translateX('+Math.sign(direction)*14+'px)' : 'translateY(6px)';
+    play(element, [{opacity:.55,transform},{opacity:1,transform:'translate(0)'}],
+      {duration:220}, element);
+  }
+
+  function snapshot(list) {
+    stop(list);
+    if (!enabled() || !list.closest('.view.is-active')) return null;
+    return new Map([...list.querySelectorAll('[data-script-id]')].slice(0,12).map(card =>
+      [card.dataset.scriptId, card.getBoundingClientRect().top]));
+  }
+
+  function settle(list, previous) {
+    stop(list);
+    if (!previous || !list.closest('.view.is-active')) return;
+    [...list.querySelectorAll('[data-script-id]')].slice(0,12).forEach(card => {
+      const oldTop = previous.get(card.dataset.scriptId);
+      const distance = oldTop == null ? 8 : Math.max(-72,Math.min(72,oldTop-card.getBoundingClientRect().top));
+      if (oldTop != null && Math.abs(distance)<1) return;
+      play(card, [{opacity:oldTop == null ? .4 : 1,transform:'translateY('+distance+'px)'},
+        {opacity:1,transform:'translateY(0)'}], {duration:240}, list);
+    });
+  }
+
+  function dialog(element, opening) {
+    stop(element);
+    if (!opening) return;
+    play(element.querySelector('.modal-bg'), [{opacity:0},{opacity:1}], {duration:180}, element);
+    play(element.querySelector('.modal-card'),
+      [{opacity:0,transform:'translateY(14px) scale(.985)'},{opacity:1,transform:'translateY(0) scale(1)'}],
+      {duration:260}, element);
   }
 
   function resetTilt() {
@@ -168,7 +205,7 @@
     });
   }, {passive:true});
 
-  window.StudioMotion = {enter, refresh, enabled};
+  window.StudioMotion = {enter, refresh, enabled, region, snapshot, settle, dialog};
   sync();
   refresh('home', true);
 })();
