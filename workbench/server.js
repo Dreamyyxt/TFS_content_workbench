@@ -1269,6 +1269,10 @@ const STATIC_FILES = new Set([
   '/secure-store.js',
   '/trend-policy.js',
   '/humanizer-policy.js',
+  '/studio-motion.js',
+  '/studio-workflow.js',
+  '/studio-shooting.js',
+  '/shooting-plan.js',
 ]);
 const SRC_EXT_RE = /\.(js|mjs|cjs|jsx|ts|tsx|json|md|markdown|map|txt|lock|yml|yaml|toml|env|py|sh)$/i;
 
