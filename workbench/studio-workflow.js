@@ -1,0 +1,48 @@
+/* Shared read-only projections for the creative workspace. Dates use Shanghai time. */
+(function(root,factory){
+  const api=factory();
+  if(typeof module==='object' && module.exports) module.exports=api;
+  else root.StudioWorkflow=api;
+})(typeof globalThis!=='undefined'?globalThis:this,()=>{
+  const sameId=(a,b)=>a!=null && b!=null && String(a)===String(b);
+  function validDay(value){
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(String(value)))return false;
+    const date=new Date(value+'T00:00:00Z');
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0,10)===value;
+  }
+  function dayKey(value){
+    if(arguments.length===0)value=new Date();
+    if(typeof value==='string' && /^\d{4}-\d{2}-\d{2}$/.test(value))return validDay(value)?value:'';
+    if(value==null || value==='')return '';
+    const date=new Date(value);
+    if(!Number.isFinite(date.getTime()))return '';
+    const parts=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date);
+    const part=type=>parts.find(p=>p.type===type).value;
+    return part('year')+'-'+part('month')+'-'+part('day');
+  }
+  function shiftDay(day,offset){
+    if(!validDay(day))return '';
+    const date=new Date(day+'T00:00:00Z');
+    date.setUTCDate(date.getUTCDate()+offset);
+    return date.toISOString().slice(0,10);
+  }
+  function weekDays(anchor){
+    if(!validDay(anchor))return [];
+    const offset=(new Date(anchor+'T00:00:00Z').getUTCDay()+6)%7;
+    const monday=shiftDay(anchor,-offset);
+    return Array.from({length:7},(_,i)=>shiftDay(monday,i));
+  }
+  function rowsOnDay(rows,day){
+    return rows.filter(r=>dayKey(r.publish_at)===day).slice().sort((a,b)=>new Date(a.publish_at)-new Date(b.publish_at));
+  }
+  const metricForSchedule=(row,metrics)=>metrics.find(m=>sameId(m.schedule_id,row.id)) || null;
+  const isScriptScheduled=(script,rows)=>rows.some(r=>sameId(r.script_id,script.id));
+  function filterScripts(entries,{query='',account='全部',status='all'}={}){
+    const term=query.trim().toLocaleLowerCase();
+    return entries.filter(({script,scan,scheduled})=>
+      (account==='全部' || script.account===account) &&
+      (!term || [script.title,script.account,script.content].join(' ').toLocaleLowerCase().includes(term)) &&
+      (status==='all' || status==='scheduled' && scheduled || status==='unplanned' && !scheduled || status==='review' && scan.hits.length>0));
+  }
+  return {sameId,dayKey,shiftDay,weekDays,rowsOnDay,metricForSchedule,isScriptScheduled,filterScripts};
+});
