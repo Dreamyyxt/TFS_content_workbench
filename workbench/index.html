@@ -581,10 +581,32 @@ node start-jianying.cjs</code></pre>
         <button class="btn btn-ghost btn-sm" id="modalFix" hidden>自动替换禁用词</button>
         <button class="btn btn-ghost btn-sm" id="modalCopy">复制全文</button>
         <button class="btn btn-ghost btn-sm" id="modalPrint">打印</button>
+        <button class="btn btn-primary btn-sm" id="modalShoot">拍摄模式</button>
         <button class="btn btn-ghost btn-sm" data-close="1">关闭</button>
       </div>
     </div>
     <div class="modal-body md" id="modalBody"></div>
+  </div>
+</dialog>
+
+<dialog id="shootDialog" class="shooting-dialog" aria-labelledby="shootTitle" hidden>
+  <div class="modal-bg" aria-hidden="true"></div>
+  <div class="modal-card shoot-shell">
+    <header class="shoot-header">
+      <div><p class="eyebrow">ON SET · 拍摄模式 <span id="shootAccount"></span></p><h2 id="shootTitle" tabindex="-1"></h2></div>
+      <button class="btn btn-ghost" id="shootClose" type="button">退出拍摄</button>
+    </header>
+    <div class="shoot-overview"><div class="shoot-progress-copy"><strong id="shootCount"></strong><p id="shootFormat"></p></div><progress id="shootProgress" aria-label="拍摄清单完成进度" value="0" max="1"></progress></div>
+    <p id="shootChanged" class="shoot-notice" hidden></p>
+    <div class="shoot-workspace">
+      <nav id="shootSteps" class="shoot-steps" aria-label="选择镜头或原文段落"></nav>
+      <div class="shoot-reading">
+        <div class="shoot-toolbar"><span>阅读字号</span><div role="group" aria-label="阅读字号"><button type="button" data-shoot-size="normal" aria-pressed="false">标准</button><button type="button" data-shoot-size="large" aria-pressed="true">大字</button><button type="button" data-shoot-size="extra" aria-pressed="false">特大</button></div></div>
+        <article id="shootBody" class="shoot-body" data-size="large" aria-labelledby="shootHeading"><div class="shoot-position"><span id="shootPosition"></span><span id="shootTime"></span></div><h3 id="shootHeading"></h3><div id="shootFields"></div></article>
+      </div>
+    </div>
+    <footer class="shoot-footer"><p id="shootComplete" class="shoot-complete" hidden></p><div class="shoot-actions"><button class="btn btn-ghost" id="shootPrev" type="button">← 上一镜</button><button class="btn btn-primary" id="shootMark" type="button" aria-pressed="false">标记这一镜已拍</button><button class="btn btn-ghost" id="shootNext" type="button">下一镜 →</button></div><p id="shootStorage"></p></footer>
+    <p id="shootAnnounce" class="visually-hidden" role="status" aria-live="polite"></p>
   </div>
 </dialog>
 
@@ -595,6 +617,8 @@ node start-jianying.cjs</code></pre>
 <script src="./account-strategy.js"></script>
 <script src="./studio-motion.js"></script>
 <script src="./studio-workflow.js"></script>
+<script src="./shooting-plan.js"></script>
+<script src="./studio-shooting.js"></script>
 <script src="./app.js"></script>
 <script src="./account-settings.js"></script>
 <script src="./jy-catalog.js"></script>

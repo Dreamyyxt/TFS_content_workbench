@@ -1672,6 +1672,7 @@ function renderScripts(){
       '</div>' +
       '<div class="script-preview">' + esc(String(s.content || '').replace(/[#*|]/g,'').slice(0, 260)) + '</div>' +
       '<div class="script-foot">' +
+        '<button class="btn btn-ghost btn-sm" data-shoot-script="'+esc(s.id)+'"'+(String(s.content || '').trim()?'':' disabled title="脚本为空"')+'>拍摄模式</button>' +
         '<button class="btn btn-primary btn-sm" data-makevideo="' + esc(s.id) + '">开始制作</button>' +
         '<button class="btn btn-primary btn-sm" data-viewscript="' + s.id + '">查看完整脚本</button>' +
         (live.hits.length
@@ -1942,6 +1943,12 @@ async function generateAll(){
   $('#btnGenAll').disabled = false;
 }
 
+function openShootingScript(id){
+  const script=S.scripts.find(s=>StudioWorkflow.sameId(s.id,id));
+  if(!script)return;
+  if(!window.StudioShooting.open(script,PUBLIC_CONFIG.endpoint))toast('这份脚本还没有内容，请先生成脚本。','warn');
+}
+
 /* 查看脚本弹窗：原生 dialog 管理模态焦点，关闭不等待动效。 */
 let scriptReturnFocus = null;
 let scriptReturnScope = null;
@@ -1949,6 +1956,7 @@ function openScript(id){
   const s = S.scripts.find(x => x.id === id);
   if (!s) return;
   $('#modalTitle').textContent = s.title;
+  $('#modalShoot').disabled=!String(s.content || '').trim();
   const scan = complianceScan(s.content);
   const hitList = scan.hits.slice(0, 6).map(h =>
     '<li><b>' + esc(h.word) + '</b>（' + esc(h.group) + '）' +
@@ -2929,6 +2937,8 @@ function bindStudioWorkflow(){
     $$('[data-calendar-day]').find(el=>el.dataset.calendarDay===S.homeDay)?.focus({preventScroll:true});
   });
   document.addEventListener('click',event=>{
+    const shooting=event.target.closest('[data-shoot-script]');
+    if(shooting){openShootingScript(shooting.dataset.shootScript);return;}
     const material=event.target.closest('[data-focus-material]');
     if(material){openMaterialWorkspace(material.dataset.focusMaterial);return;}
     const scriptButton=event.target.closest('[data-open-script]');
@@ -3189,6 +3199,7 @@ function bind(){
     const id = Number(e.target.closest('#modalFix').dataset.fixscript);
     if (id) autoFixScript(id);
   });
+  $('#modalShoot').addEventListener('click',()=>openShootingScript(S.modalScriptId));
   $('#modalCopy').addEventListener('click', async () => {
     const raw = $('#modal').dataset.raw || '';
     try{
