@@ -516,6 +516,7 @@ const S = {
   filter: '全部',
   dataFilter: '全部',
   onlyLatest: true,
+  selectedOnly: false,
   busy: false,
   gen: {},              /* 正在生成的素材 id 集合，避免重复触发 */
   genRunning: 0,
@@ -686,6 +687,7 @@ function visibleMaterials(){
     if (b) list = list.filter(m => m.batch_id === b);
   }
   if (S.filter !== '全部') list = list.filter(m => m.account === S.filter);
+  if (S.selectedOnly) list = list.filter(m => m.selected);
   const query = S.search.trim().toLocaleLowerCase();
   if(query) list = list.filter(m => [m.title,m.keywords,m.account,m.angle,m.hook].join(' ').toLocaleLowerCase().includes(query));
   return list;
@@ -1173,9 +1175,9 @@ function renderFilter(){
   const pool = S.onlyLatest ? S.materials.filter(m => m.batch_id === latestBatch()) : S.materials;
   pool.forEach(m => { if (counts[m.account] != null) counts[m.account]++; });
   const total = Object.values(counts).reduce((x,y) => x+y, 0);
-  let html = '<button class="chip' + (S.filter === '全部' ? ' is-active' : '') + '" data-acc="全部">全部<small>' + total + '</small></button>';
+  let html = '<button class="chip' + (S.filter === '全部' ? ' is-active' : '') + '" data-acc="全部" aria-pressed="'+(S.filter==='全部')+'">全部<small>' + total + '</small></button>';
   ACCOUNTS.forEach(a => {
-    html += '<button class="chip' + (S.filter === a.name ? ' is-active' : '') + '" data-acc="' + esc(a.name) + '">' +
+    html += '<button class="chip' + (S.filter === a.name ? ' is-active' : '') + '" data-acc="' + esc(a.name) + '" aria-pressed="'+(S.filter===a.name)+'">' +
       esc(a.name) + '<small>' + counts[a.name] + '</small></button>';
   });
   $('#accountFilter').innerHTML = html;
@@ -1186,14 +1188,24 @@ function scriptForMaterial(id){
 }
 
 function renderMaterials(){
-  window.StudioMotion?.refresh('materials');
-  const list = visibleMaterials();
   const grid = $('#materialGrid');
+  const previous = window.StudioMotion?.snapshot(grid,'data-material-id');
+  const focusedPick=document.activeElement?.dataset.pick;
+  const restorePick=()=>{
+    if(!focusedPick)return;
+    const button=[...grid.querySelectorAll('[data-pick]')].find(el=>el.dataset.pick===focusedPick);
+    (button || $('#selectedOnly')).focus({preventScroll:true});
+  };
+  const list = visibleMaterials();
+  $('#selectedOnly').setAttribute('aria-pressed',String(S.selectedOnly));
+  $('#selectedOnly').classList.toggle('is-active',S.selectedOnly);
   $('#materialResultCount').textContent = list.length + ' 个选题';
-  $('#materialEmpty').textContent = S.search || S.filter !== '全部' ? '没有匹配的选题，试试其他关键词或账号。' : '还没有选题。点击「实时采集风向」获取灵感，或载入趋势底稿。';
+  $('#materialEmpty').textContent = S.selectedOnly ? '当前筛选范围里还没有已选选题。可关闭「只看已选」继续挑选。' : S.search || S.filter !== '全部' ? '没有匹配的选题，试试其他关键词或账号。' : '还没有选题。点击「实时采集风向」获取灵感，或载入趋势底稿。';
   if (!list.length){
     grid.innerHTML = '';
     $('#materialEmpty').hidden = false;
+    window.StudioMotion?.region($('#materialEmpty'));
+    restorePick();
     return;
   }
   $('#materialEmpty').hidden = true;
@@ -1216,45 +1228,109 @@ function renderMaterials(){
       (kws.length ? '<div class="card-kw">' + kws.map(k => '<span>' + esc(k.trim()) + '</span>').join('') + '</div>' : '') +
       (m.trend_reason ? '<div class="card-reason">' + esc(m.trend_reason) + '</div>' : '') +
       '<div class="card-foot">' +
-        '<button type="button" class="pick" aria-pressed="' + !!m.selected + '" data-pick="' + esc(m.id) + '">' +
-          (m.selected ? '✓ 已加入待制作' : '+ 加入待制作') +
+        '<button type="button" class="pick" aria-pressed="' + !!m.selected + '" aria-disabled="'+(clearingSelection || selectionWrites.has(m.id))+'" data-pick="' + esc(m.id) + '">' +
+          (selectionWrites.has(m.id) ? '保存中…' : m.selected ? '✓ 已加入待制作' : '+ 加入待制作') +
         '</button>' +
         '<button class="btn-danger-ghost" data-del="' + m.id + '" title="删除该素材">删除</button>' +
       '</div>' +
     '</article>';
   }).join('');
+  window.StudioMotion?.settle(grid,previous,'data-material-id');
+  restorePick();
+}
+
+const selectionWrites = new Set();
+let clearingSelection = false;
+
+function updatePickCards(){
+  $$('#materialGrid [data-material-id]').forEach(card=>{
+    const material=S.materials.find(m=>String(m.id)===card.dataset.materialId);
+    if(!material)return;
+    const saving=selectionWrites.has(material.id);
+    const button=card.querySelector('[data-pick]');
+    card.classList.toggle('is-selected',!!material.selected);
+    card.classList.toggle('is-saving',saving);
+    button.setAttribute('aria-pressed',String(!!material.selected));
+    button.setAttribute('aria-disabled',String(clearingSelection || saving));
+    button.textContent=saving?'保存中…':material.selected?'✓ 已加入待制作':'+ 加入待制作';
+  });
+}
+
+async function persistSelection(id, selected){
+  const {data,error}=await cloud.database.from('materials').update({selected}).eq('id',id).select();
+  if(error || !data?.length)throw new Error('选择未保存');
+  const current=S.materials.find(m=>m.id===id);
+  if(current)current.selected=selected;
+}
+
+function refreshSelection(){
+  updatePickCards();renderBasket();renderBadges();renderPending();renderProgress();
 }
 
 async function togglePick(id){
-  const m = S.materials.find(x => x.id === id);
-  if (!m) return;
-  const next = !m.selected;
-  m.selected = next;
-  renderMaterials(); renderBasket(); renderBadges(); renderPending(); renderProgress();
-  const { data, error } = await cloud.database.from('materials')
-    .update({ selected: next }).eq('id', id).select();
-  if (error || !data || !data.length){
-    m.selected = !next;
-    renderMaterials(); renderBasket(); renderBadges(); renderPending(); renderProgress();
-    toast('保存失败，请重试', 'err');
+  const m=S.materials.find(x=>x.id===id);
+  if(!m || clearingSelection || selectionWrites.has(id))return;
+  const next=!m.selected;
+  selectionWrites.add(id);updatePickCards();renderBasket();
+  let saved=false;
+  try{
+    await persistSelection(id,next);
+    saved=true;
+    $('#selectionStatus').textContent=(next?'已加入：':'已移除：')+m.title;
+  }catch(_){
+    $('#selectionStatus').textContent='未能确认保存，页面保留原选择。';
+    toast('未能确认保存，页面保留原选择，请重试','err');
+  }finally{
+    selectionWrites.delete(id);
+    if(saved && S.selectedOnly)renderMaterials();
+    refreshSelection();
+  }
+  if(saved){
+    const card=$$('#materialGrid [data-material-id]').find(el=>el.dataset.materialId===String(id));
+    window.StudioMotion?.selection(card,$('#basketCount'));
   }
 }
 
+async function clearSelection(){
+  if(clearingSelection || selectionWrites.size)return;
+  const selected=S.materials.filter(m=>m.selected);
+  if(!selected.length)return;
+  clearingSelection=true;
+  selected.forEach(m=>selectionWrites.add(m.id));
+  updatePickCards();renderBasket();
+  const results=await Promise.allSettled(selected.map(m=>persistSelection(m.id,false)));
+  selected.forEach(m=>selectionWrites.delete(m.id));
+  clearingSelection=false;
+  const returnToFilter=document.activeElement===$('#btnClearBasket');
+  if(S.selectedOnly)renderMaterials();
+  refreshSelection();
+  const failed=results.filter(r=>r.status==='rejected').length;
+  const message=failed?'已移除 '+(selected.length-failed)+' 条，'+failed+' 条未保存，仍保留在已选中。':'已清空待制作';
+  $('#selectionStatus').textContent=message;
+  toast(message,failed?'err':'ok');
+  if(returnToFilter && $('#basket').hidden)$('#selectedOnly').focus({preventScroll:true});
+}
+
 async function delMaterial(id){
+  if(clearingSelection || selectionWrites.has(id)){toast('选择正在保存，请稍后再删除','warn');return;}
   const m = S.materials.find(x => x.id === id);
   const ok = await askConfirm('删除素材「' + ((m && m.title) || '') + '」？已生成的脚本与排期不会被删除。', '删除素材');
   if (!ok) return;
   const { error } = await cloud.database.from('materials').delete().eq('id', id);
   if (error){ toast('删除失败：' + (error.message || ''), 'err'); return; }
   S.materials = S.materials.filter(m => m.id !== id);
-  renderMaterials(); renderFilter(); renderBadges(); renderPending(); renderProgress();
+  renderMaterials(); renderFilter(); renderBasket(); renderBadges(); renderPending(); renderProgress();
   toast('已删除素材', 'ok');
 }
 
 function renderBasket(){
   const n = S.materials.filter(m => m.selected).length;
   $('#basketCount').textContent = n;
-  $('#basket').hidden = n === 0;
+  $('#basket').hidden = n === 0 && !selectionWrites.size;
+  const pending=S.materials.filter(m=>m.selected && !scriptForMaterial(m.id)).length;
+  $('#basketMeta').textContent=selectionWrites.size?'正在保存选择…':pending+' 条待写脚本 · '+(n-pending)+' 条已有脚本';
+  $('#btnClearBasket').setAttribute('aria-disabled',String(!!selectionWrites.size));
+  $('#btnGoScripts').setAttribute('aria-disabled',String(!!selectionWrites.size));
 }
 
 function renderBadges(){
@@ -2810,7 +2886,7 @@ function openMaterialWorkspace(id){
     S.pendingOnly=false;$('#pendingOnly').checked=false;renderPending();
     switchView('scripts');focusWorkspaceItem('data-pending-id',material.id);
   }else{
-    S.search='';S.filter='全部';S.onlyLatest=false;
+    S.search='';S.filter='全部';S.onlyLatest=false;S.selectedOnly=false;
     $('#materialSearch').value='';$('#onlyLatest').checked=false;
     renderFilter();renderMaterials();switchView('materials');focusWorkspaceItem('data-material-id',material.id);
   }
@@ -3043,7 +3119,9 @@ function bind(){
     const c = e.target.closest('.chip'); if (!c) return;
     S.filter = c.dataset.acc;
     renderFilter(); renderMaterials();
+    $$('#accountFilter [data-acc]').find(button=>button.dataset.acc===S.filter)?.focus({preventScroll:true});
   });
+  $('#selectedOnly').addEventListener('click',()=>{S.selectedOnly=!S.selectedOnly;renderMaterials();});
   $('#onlyLatest').addEventListener('change', e => {
     S.onlyLatest = e.target.checked;
     renderFilter(); renderMaterials();
@@ -3057,17 +3135,14 @@ function bind(){
   });
 
   $('#basket').addEventListener('click', e => {
-    if (e.target.closest('#btnGoScripts')){ switchView('scripts'); return; }
-    if (e.target.closest('#btnClearBasket')){
-      const sel = S.materials.filter(m => m.selected);
-      if (!sel.length) return;
-      sel.forEach(m => { m.selected = false; });
-      renderMaterials(); renderBasket(); renderBadges(); renderPending(); renderProgress();
-      Promise.all(sel.map(m => cloud.database.from('materials')
-        .update({ selected:false }).eq('id', m.id).select()))
-      .then(() => toast('已清空待制作', 'ok'))
-      .catch(() => toast('清空失败，请刷新重试', 'err'));
+    if(selectionWrites.size)return;
+    if(e.target.closest('#btnGoScripts')){
+      S.pendingOnly=false;$('#pendingOnly').checked=false;renderPending();switchView('scripts');
+      const first=S.materials.find(m=>m.selected && !scriptForMaterial(m.id)) || S.materials.find(m=>m.selected);
+      if(first)focusWorkspaceItem('data-pending-id',first.id);
+      return;
     }
+    if(e.target.closest('#btnClearBasket'))clearSelection();
   });
 
   $('#pendingList').addEventListener('click', e => {

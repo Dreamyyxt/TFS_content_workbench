@@ -92,23 +92,38 @@
       {duration:220}, element);
   }
 
-  function snapshot(list) {
+  function snapshot(list, attribute = 'data-script-id') {
     stop(list);
     if (!enabled() || !list.closest('.view.is-active')) return null;
-    return new Map([...list.querySelectorAll('[data-script-id]')].slice(0,12).map(card =>
-      [card.dataset.scriptId, card.getBoundingClientRect().top]));
+    return new Map([...list.querySelectorAll('['+attribute+']')].slice(0,12).map(card => {
+      const rect=card.getBoundingClientRect();
+      return [card.getAttribute(attribute),{x:rect.left,y:rect.top}];
+    }));
   }
 
-  function settle(list, previous) {
+  function settle(list, previous, attribute = 'data-script-id') {
     stop(list);
     if (!previous || !list.closest('.view.is-active')) return;
-    [...list.querySelectorAll('[data-script-id]')].slice(0,12).forEach(card => {
-      const oldTop = previous.get(card.dataset.scriptId);
-      const distance = oldTop == null ? 8 : Math.max(-72,Math.min(72,oldTop-card.getBoundingClientRect().top));
-      if (oldTop != null && Math.abs(distance)<1) return;
-      play(card, [{opacity:oldTop == null ? .4 : 1,transform:'translateY('+distance+'px)'},
-        {opacity:1,transform:'translateY(0)'}], {duration:240}, list);
+    [...list.querySelectorAll('['+attribute+']')].slice(0,12).forEach(card => {
+      const old = previous.get(card.getAttribute(attribute));
+      const rect = card.getBoundingClientRect();
+      const clamp = value=>Math.max(-72,Math.min(72,value));
+      const x = old ? clamp(old.x-rect.left) : 0;
+      const y = old ? clamp(old.y-rect.top) : 8;
+      if (old && Math.abs(x)<1 && Math.abs(y)<1) return;
+      play(card, [{opacity:old ? 1 : .4,transform:'translate('+x+'px,'+y+'px)'},
+        {opacity:1,transform:'translate(0)'}], {duration:240}, list);
     });
+  }
+
+  function selection(card, counter) {
+    if (!counter.closest('.view.is-active')) return;
+    if(card){
+      stop(card);
+      play(card,[{scale:'.992'},{scale:'1'}],{duration:200},card);
+    }
+    stop(counter);
+    play(counter,[{scale:'1'},{scale:'1.16',offset:.4},{scale:'1'}],{duration:260},counter);
   }
 
   function dialog(element, opening) {
@@ -205,7 +220,7 @@
     });
   }, {passive:true});
 
-  window.StudioMotion = {enter, refresh, enabled, region, snapshot, settle, dialog};
+  window.StudioMotion = {enter, refresh, enabled, region, snapshot, settle, selection, dialog};
   sync();
   refresh('home', true);
 })();

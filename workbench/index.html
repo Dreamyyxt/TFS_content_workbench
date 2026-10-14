@@ -173,23 +173,24 @@
     </div>
 
     <div class="filterbar">
-      <div class="chips" id="accountFilter"></div>
+      <div class="chips" id="accountFilter" role="group" aria-label="按账号筛选选题"></div>
       <label class="switch">
         <input type="checkbox" id="onlyLatest" checked />
         <span>仅看最新一批</span>
       </label>
     </div>
 
-    <div class="library-toolbar"><h3>灵感选题库 <span id="materialResultCount"></span></h3><label class="studio-search"><span aria-hidden="true">⌕</span><input type="search" id="materialSearch" placeholder="搜索标题、关键词或账号" aria-label="搜索选题" /></label></div>
+    <div class="library-toolbar"><h3>灵感选题库 <span id="materialResultCount"></span></h3><button type="button" class="chip" id="selectedOnly" aria-pressed="false">只看已选</button><label class="studio-search"><span aria-hidden="true">⌕</span><input type="search" id="materialSearch" placeholder="搜索标题、关键词或账号" aria-label="搜索选题" /></label></div>
     <div class="grid" id="materialGrid"></div>
     <div class="empty" id="materialEmpty" hidden>
       还没有素材。点右上角「同步联网风向」载入本季风向选题，或「生成新的视频计划」让 AI 按热点出新一批。
     </div>
 
-    <div class="basket" id="basket" hidden>
-      <span>已选 <b id="basketCount">0</b> 条素材</span>
-      <button class="btn btn-ghost btn-sm" id="btnClearBasket">清空</button>
-      <button class="btn btn-primary btn-sm" id="btnGoScripts">去生成脚本 →</button>
+    <p class="visually-hidden" id="selectionStatus" role="status" aria-live="polite"></p>
+    <div class="basket" id="basket" role="region" aria-label="已选选题与下一步" hidden>
+      <div class="basket-summary"><span>已选 <b id="basketCount">0</b> 个灵感</span><small id="basketMeta"></small></div>
+      <button class="btn btn-ghost btn-sm" id="btnClearBasket">清空已选</button>
+      <button class="btn btn-primary btn-sm" id="btnGoScripts">去写脚本 →</button>
     </div>
   </section>
 

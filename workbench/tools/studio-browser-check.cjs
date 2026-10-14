@@ -23,7 +23,7 @@ const fixture={
  page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/*', async route=>{
   const url=route.request().url();
-  if(url.includes('cdn.jsdelivr.net')) return route.fulfill({contentType:'application/javascript',body:`window.WorkBuddyCloud={createWorkBuddyCloud:()=>({database:{from:table=>{let rows=window.fixture[table]||[];let patch=null;const q={select(){return q},order(){return q},limit(){return q},eq(key,value){rows=rows.filter(r=>r[key]===value);return q},update(p){patch=p;return q},then(resolve){if(patch)rows.forEach(r=>Object.assign(r,patch));return Promise.resolve({data:rows,error:null}).then(resolve)}};return q}},llm:{models:{list:async()=>[{id:'test-model',name:'测试模型',maxInputTokens:1000,maxOutputTokens:1000}]}}})};`});
+  if(url.includes('cdn.jsdelivr.net')) return route.fulfill({contentType:'application/javascript',body:`window.WorkBuddyCloud={createWorkBuddyCloud:()=>({database:{from:table=>{let rows=window.fixture[table]||[];let patch=null;const q={select(){return q},order(){return q},limit(){return q},eq(key,value){rows=rows.filter(r=>r[key]===value);return q},update(p){patch=p;return q},then(resolve,reject){return (async()=>{if(patch){const control=window.fixtureControl||{};if(table==='materials'){control.calls=(control.calls||0)+1;if(control.delay)await new Promise(r=>setTimeout(r,control.delay));if(control.throwIds?.some(id=>rows.some(r=>r.id===id)))throw new Error('Simulated transport failure');if(control.failIds?.some(id=>rows.some(r=>r.id===id)))return {data:[],error:{message:'Simulated SDK failure'}};if(control.emptyIds?.some(id=>rows.some(r=>r.id===id)))return {data:[],error:null};}rows.forEach(r=>Object.assign(r,patch));}return {data:rows,error:null}})().then(resolve,reject)}};return q}},llm:{models:{list:async()=>[{id:'test-model',name:'测试模型',maxInputTokens:1000,maxOutputTokens:1000}]}}})};`});
   if(url.startsWith(origin+'/'))return route.continue();
   return route.abort();
  });
@@ -116,6 +116,92 @@ const fixture={
  assert.equal(await page.locator('#jyModeGenerate').getAttribute('aria-pressed'),'true');
  await page.locator('#jyModeEdit').click();
  assert.equal(await page.locator('#jyModeEdit').getAttribute('aria-pressed'),'true');
+ // Selection updates one card in place and reports only saved selections.
+ await page.locator('.tab[data-view="materials"]').click();
+ await page.locator('#materialSearch').fill('');
+ await page.evaluate(()=>{window.fixtureControl={delay:250,calls:0};window.savedPick=document.querySelector('[data-pick="4"]');window.neighbor=document.querySelector('[data-material-id="3"]')});
+ await page.locator('[data-pick="4"]').focus();
+ const pendingSelection=await page.evaluate(()=>{
+  savedPick.click();savedPick.click();
+  return {disabled:savedPick.getAttribute('aria-disabled'),selected:savedPick.getAttribute('aria-pressed'),count:document.getElementById('basketCount').textContent};
+ });
+ assert.equal(pendingSelection.disabled,'true');assert.equal(pendingSelection.selected,'false');assert.equal(pendingSelection.count,'3');
+ await page.waitForFunction(()=>document.querySelector('[data-pick="4"]').getAttribute('aria-disabled')==='false');
+ assert.equal(await page.evaluate(()=>fixtureControl.calls),1);
+ assert.equal(await page.evaluate(()=>savedPick===document.querySelector('[data-pick="4"]') && neighbor===document.querySelector('[data-material-id="3"]')),true);
+ assert.equal(await page.evaluate(()=>document.activeElement===savedPick),true);
+ assert.equal(await page.locator('#basketCount').textContent(),'4');
+ assert.match(await page.locator('#basketMeta').textContent(),/3 条待写脚本/);
+ await page.locator('[data-pick="4"]').click();
+ await page.waitForFunction(()=>document.querySelector('[data-pick="4"]').getAttribute('aria-disabled')==='false');
+ for(const mode of ['failIds','throwIds','emptyIds']){
+  await page.evaluate(mode=>{window.fixtureControl={[mode]:[4]};},mode);
+  await page.locator('[data-pick="4"]').click();
+  await page.waitForFunction(()=>document.querySelector('[data-pick="4"]').getAttribute('aria-disabled')==='false');
+  assert.equal(await page.locator('[data-pick="4"]').getAttribute('aria-pressed'),'false');
+  assert.equal(await page.locator('#basketCount').textContent(),'3');
+ }
+ await page.evaluate(()=>{window.fixtureControl={}});
+ await page.locator('#selectedOnly').click();
+ assert.equal(await page.locator('#materialGrid .card').count(),3);
+ await page.locator('#accountFilter [data-acc="小红书官方号"]').click();
+ assert.equal(await page.locator('#materialGrid .card').count(),1);
+ assert.equal(await page.locator('#accountFilter [data-acc="小红书官方号"]').getAttribute('aria-pressed'),'true');
+ assert.equal(await page.evaluate(()=>document.activeElement.dataset.acc),'小红书官方号');
+ await page.locator('#materialSearch').fill('不存在的选题');
+ assert.equal(await page.locator('#materialEmpty').isVisible(),true);
+ await page.locator('#materialSearch').fill('');
+ await page.locator('[data-pick="2"]').click();
+ await page.waitForFunction(()=>!document.querySelector('[data-pick="2"]'));
+ assert.equal(await page.evaluate(()=>document.activeElement.id),'selectedOnly');
+ await page.locator('#selectedOnly').click();
+ await page.locator('[data-pick="2"]').click();
+ await page.waitForFunction(()=>document.querySelector('[data-pick="2"]').getAttribute('aria-pressed')==='true');
+ await page.locator('#accountFilter [data-acc="全部"]').click();
+ await page.locator('#selectedOnly').click();
+ await page.evaluate(()=>{
+  window.fixtureControl={delay:180};
+  document.querySelector('[data-pick="1"]').click();
+  document.querySelector('[data-pick="3"]').focus();
+ });
+ await page.waitForFunction(()=>!document.querySelector('[data-pick="1"]'));
+ assert.equal(await page.evaluate(()=>document.activeElement.dataset.pick),'3');
+ await page.locator('#selectedOnly').click();
+ await page.evaluate(()=>{window.fixtureControl={}});
+ await page.locator('[data-pick="1"]').click();
+ await page.waitForFunction(()=>document.querySelector('[data-pick="1"]').getAttribute('aria-disabled')==='false');
+ await page.locator('#btnGoScripts').click();
+ await page.waitForFunction(()=>document.activeElement?.dataset.pendingId==='2');
+ await page.locator('.tab[data-view="materials"]').click();
+ // Partial bulk failures must retain the failed selections and allow retry.
+ await page.evaluate(()=>{window.fixtureControl={failIds:[2],throwIds:[3]}});
+ await page.locator('#btnClearBasket').click();
+ await page.waitForFunction(()=>document.getElementById('btnClearBasket').getAttribute('aria-disabled')==='false');
+ assert.equal(await page.locator('#basketCount').textContent(),'2');
+ assert.equal(await page.locator('[data-pick="1"]').getAttribute('aria-pressed'),'false');
+ assert.equal(await page.locator('[data-pick="2"]').getAttribute('aria-pressed'),'true');
+ assert.equal(await page.locator('[data-pick="3"]').getAttribute('aria-pressed'),'true');
+ assert.match(await page.locator('#selectionStatus').textContent(),/2 条未保存/);
+ await page.evaluate(()=>{window.fixtureControl={}});
+ await page.locator('#btnClearBasket').click();
+ await page.waitForFunction(()=>document.getElementById('basket').hidden);
+ assert.equal(await page.evaluate(()=>document.activeElement.id),'selectedOnly');
+ for(const id of [1,2,3]){
+  await page.locator('[data-pick="'+id+'"]').click();
+  await page.waitForFunction(id=>document.querySelector('[data-pick="'+id+'"]').getAttribute('aria-disabled')==='false',id);
+ }
+ await page.locator('#materialGrid').scrollIntoViewIfNeeded();
+ await page.waitForFunction(()=>!document.querySelector('#toastWrap .toast'));
+ await page.screenshot({path:join(artifactDir,'selection.png'),animations:'disabled'});
+ for(const width of [320,390]){
+  await page.setViewportSize({width,height:844});
+  await page.evaluate(()=>scrollTo({top:document.documentElement.scrollHeight,behavior:'instant'}));
+  assert.ok(await page.locator('#basket').evaluate(el=>el.getBoundingClientRect().bottom<=innerHeight && el.getBoundingClientRect().top>=0));
+  assert.ok(await page.evaluate(()=>document.querySelector('[data-pick="8"]').getBoundingClientRect().bottom<=document.getElementById('basket').getBoundingClientRect().top),'last selection button must remain reachable above the tray');
+ }
+ await page.locator('.library-toolbar').scrollIntoViewIfNeeded();
+ await page.screenshot({path:join(artifactDir,'selection-mobile.png'),animations:'disabled'});
+ await page.setViewportSize({width:1440,height:1000});
  // Workflow acceptance uses isolated records with explicit links and missing sources.
  await page.locator('.tab[data-view="home"]').click();
  await page.locator('#homeNext [data-focus-material="2"]').click();
@@ -310,10 +396,23 @@ const fixture={
  assert.equal(await page.evaluate(()=>document.activeElement.closest('#scriptList')?.id),'scriptList');
  if(process.env.STUDIO_RECORD_DEMO==='1'){
   const demo=await browser.newPage({viewport:{width:1440,height:1000},recordVideo:{dir:artifactDir,size:{width:1440,height:1000}}});
-  const demoRecords=await page.evaluate(()=>fixture);
+  const selectionDemo=process.env.STUDIO_DEMO_KIND==='selection';
+  const demoRecords=selectionDemo ? structuredClone(fixture) : await page.evaluate(()=>fixture);
   demoRecords.scripts[0].content='## 秋日指尖，留一点温柔的琥珀色\n\n用真实上手效果，记录一束光里的秋天。\n\n### 00–03 秒 · 光落在指尖\n\n近景拍摄琥珀猫眼，手指轻轻转动，让光带自然移动。\n\n### 03–12 秒 · 看见细节\n\n切换侧面和俯拍角度，展示短甲的弧度与颜色层次。\n\n### 12–20 秒 · 回到日常\n\n手拿咖啡杯或翻动书页，让款式进入真实生活。\n\n### 发布文案\n\n换季想留一点温暖，从指尖开始。你喜欢偏透的琥珀色，还是更浓一点的焦糖色？';
   await prepare(demo,demoRecords);
   await demo.evaluate(()=>{document.querySelector('.studio-page-heading .eyebrow').textContent='交互演示 · 隔离示例数据'});
+  if(selectionDemo){
+   await demo.locator('.tab[data-view="materials"]').click();
+   await demo.locator('#materialGrid').scrollIntoViewIfNeeded();
+   await demo.evaluate(()=>{window.fixtureControl={delay:400}});
+   await demo.waitForTimeout(900);
+   await demo.locator('[data-pick="4"]').click();await demo.waitForTimeout(900);
+   await demo.locator('#accountFilter [data-acc="小红书官方号"]').click();await demo.waitForTimeout(900);
+   await demo.locator('#accountFilter [data-acc="全部"]').click();await demo.waitForTimeout(700);
+   await demo.locator('#selectedOnly').click();await demo.waitForTimeout(900);
+   await demo.locator('[data-pick="4"]').click();await demo.waitForTimeout(1000);
+   await demo.locator('#btnGoScripts').click();await demo.waitForTimeout(1100);
+  }else{
   await demo.locator('.home-calendar').scrollIntoViewIfNeeded();
   await demo.waitForTimeout(900);
   await demo.locator('#homeNextWeek').click();await demo.waitForTimeout(750);
@@ -325,10 +424,11 @@ const fixture={
   await demo.locator('#scriptList [data-viewscript="101"]').click();await demo.waitForTimeout(1100);
   await demo.locator('#modalBody').evaluate(el=>el.scrollTo({top:320,behavior:'smooth'}));await demo.waitForTimeout(900);
   await demo.keyboard.press('Escape');await demo.waitForTimeout(900);
+  }
   const video=demo.video();await demo.close();
   await video.saveAs(join(artifactDir,'interactions.webm'));await video.delete();
  }
  assert.deepEqual(errors,[]);
- console.log('PASS: overview counts, search, selection, script handoff, video modes, filtered charts/ranking, empty states, 9 views × 5 widths, motion preference persistence, keyboard links, animation cancellation, rapid navigation, reduced motion; exact topic navigation, composed script filters, calendar navigation and linked forms, missing sources, directional calendar motion, interrupted filters, native modal focus/inert background, immediate close/reopen, reduced dialog motion and long mobile scripts; no uncaught errors.');
+ console.log('PASS: overview counts, search, selection, script handoff, video modes, filtered charts/ranking, empty states, 9 views × 5 widths, motion preference persistence, keyboard links, animation cancellation, rapid navigation, reduced motion; exact topic navigation, composed script filters, calendar navigation and linked forms, missing sources, directional calendar motion, interrupted filters, saved selection feedback, rejected writes and partial bulk retry, composed selection filters, stable pick focus, native modal focus/inert background, immediate close/reopen, reduced dialog motion and long mobile scripts; no uncaught errors.');
  }finally{await browser.close()}
 })().catch(e=>{console.error(e);process.exitCode=1});

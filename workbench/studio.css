@@ -132,3 +132,17 @@ dialog.modal::backdrop{background:transparent}
 @media(max-width:540px){#modal .modal-card{height:100dvh;max-height:100dvh}}
 
 #modal .toast-wrap{max-width:calc(100% - 28px);pointer-events:none}
+
+/* Selected ideas stay in place while their saved state is updated. */
+#view-materials{padding-bottom:100px}
+#selectedOnly{flex-shrink:0;white-space:nowrap}
+.library-toolbar h3{margin-right:auto}
+.pick{min-width:124px;transition:background .18s,box-shadow .18s,color .18s}
+.pick[aria-disabled="true"]{cursor:wait;opacity:.7}
+.card.is-saving{border-color:#c5b09c}
+.basket{left:calc(50% + 112px);width:min(660px,calc(100vw - 280px));padding:14px 18px;gap:14px;border:1px solid #fff9;border-radius:20px;background:linear-gradient(130deg,#fcf9f3f5,#ece2d6f5);color:var(--ink);box-shadow:0 12px 35px #6d503c26,inset 1px 1px 0 #fff;transition:none}
+.basket-summary{min-width:0;flex:1;font-size:12px}.basket-summary b{color:var(--brand);font-size:22px;display:inline-block;font-variant-numeric:tabular-nums}.basket-summary small{display:block;font-size:10px;color:var(--muted);margin-top:2px}
+.basket .btn{flex-shrink:0;min-height:34px}.basket .btn-ghost{background:var(--bg);color:var(--ink-2);border-color:#fff8}.basket .btn-ghost:hover{background:#fffaf4;color:var(--brand);border-color:#c7b49f}.basket .btn-primary{background:linear-gradient(135deg,#a47155,#80513c);color:#fffaf6}.basket .btn-primary:hover{background:linear-gradient(135deg,#96654b,#70452f);color:#fffaf6}.basket [aria-disabled="true"]{opacity:.55;cursor:wait;transform:none}
+@media(max-width:1080px){.basket{left:50%;width:min(660px,calc(100vw - 32px))}}
+@media(max-width:760px){.library-toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:13px}.library-toolbar h3{margin:0}.library-toolbar .studio-search{grid-column:1/-1}.library-toolbar h3 span{display:block;margin:4px 0 0}}
+@media(max-width:540px){.basket{left:14px;right:14px;width:auto;transform:none;bottom:calc(12px + env(safe-area-inset-bottom));display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:13px 15px;border-radius:17px}.basket-summary{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:10px}.basket-summary small{font-size:9px;text-align:right}.basket .btn{width:100%}}
