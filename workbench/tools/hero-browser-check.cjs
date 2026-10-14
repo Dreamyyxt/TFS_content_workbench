@@ -20,7 +20,7 @@ const labels={materials:'风口选题',scripts:'拍摄辅助',video:'视频制�
   const target=document.querySelector('.network-node[data-route="'+core.dataset.module+'"] .node-orb').getBoundingClientRect();
   const center=core.getBoundingClientRect();
   const expected=Math.atan2(target.top+target.height/2-center.top-center.height/2,target.left+target.width/2-center.left-center.width/2)*180/Math.PI;
-  const actual=parseFloat(core.style.getPropertyValue('--aim-angle'));
+  const actual=Math.atan2(parseFloat(core.style.getPropertyValue('--glow-y')),parseFloat(core.style.getPropertyValue('--glow-x')))*180/Math.PI;
   return Math.abs(((actual-expected+180)%360+360)%360-180);
  });}
  const poses=[];
@@ -30,9 +30,11 @@ const labels={materials:'风口选题',scripts:'拍摄辅助',video:'视频制�
   assert.equal(await page.locator('#coreModuleLabel').textContent(),labels[route]);
   assert.equal(await page.locator('[data-network-route="'+route+'"].is-linked').count(),2);
   assert.equal(await page.locator('.network-node.is-linked').count(),1);
-  await page.waitForTimeout(1100);
+  await page.waitForTimeout(1200);
+  assert.equal(await page.locator('.core-track').evaluate(el=>getComputedStyle(el).rotate),'none','frame stays fixed');
+  assert.equal(await page.locator('.core-track').evaluate(el=>getComputedStyle(el,'::before').content),'none','no ambiguous opposing arcs');
   assert.ok(await assertAim()<5,'direction must point toward '+route);
-  poses.push(await page.locator('.orb-rotor').evaluate(el=>getComputedStyle(el).transform));
+  poses.push(await page.locator('.orb-form').evaluate(el=>getComputedStyle(el).transform));
   await page.locator('.creative-network').screenshot({path:join(dir,route+'.png'),animations:'disabled'});
  }
  assert.equal(new Set(poses).size,4,'modules must produce visibly different sculpture poses');
@@ -45,16 +47,16 @@ const labels={materials:'风口选题',scripts:'拍摄辅助',video:'视频制�
  assert.equal(await core.getAttribute('data-module'),'scripts');
  await page.keyboard.press('Shift+Tab');
  assert.equal(await core.getAttribute('data-module'),'materials');
- // Left-hand directions cross the angle boundary using the short path.
+ // Rapid changes cancel the old response instead of piling up ripples.
  await page.locator('.node-top-left').hover();
- const previous=await core.evaluate(el=>parseFloat(el.style.getPropertyValue('--aim-angle')));
  await page.locator('.node-bottom-left').hover();
- const next=await core.evaluate(el=>parseFloat(el.style.getPropertyValue('--aim-angle')));
- assert.ok(Math.abs(next-previous)<=180);
- await page.waitForTimeout(250);
- assert.equal(await page.locator('.orb-spin').evaluate(el=>getComputedStyle(el).animationPlayState),'running');
  await page.locator('.node-bottom-right').hover();
- assert.equal(await page.locator('.orb-spin').evaluate(el=>getComputedStyle(el).animationPlayState),'paused');
+ assert.equal(await core.getAttribute('data-module'),'schedule');
+ assert.ok(await page.locator('.core-response').evaluate(el=>el.getAnimations().length)<=1);
+ assert.ok(await page.locator('.orb-center').evaluate(el=>el.getAnimations().filter(a=>a.constructor.name==='Animation').length)<=1);
+ await page.waitForTimeout(1250);
+ assert.equal(await page.locator('.core-response').evaluate(el=>getComputedStyle(el).opacity),'0');
+ assert.equal(await page.locator('.core-response').evaluate(el=>el.getAnimations().length),0);
  for(const width of [1024,768,390,320]){
   await page.setViewportSize({width,height:900});
   await page.locator('.node-bottom-right').hover();await page.waitForTimeout(700);
@@ -79,7 +81,6 @@ const labels={materials:'风口选题',scripts:'拍摄辅助',video:'视频制�
  await page.emulateMedia({reducedMotion:'no-preference'});
  await page.locator('.node-top-right').click();
  assert.equal(await page.locator('#view-scripts').isVisible(),true,'navigation must stay immediate');
- assert.equal(await page.locator('.orb-spin').evaluate(el=>getComputedStyle(el).animationPlayState),'paused');
  assert.equal(await page.locator('.orb-petals').evaluate(el=>getComputedStyle(el).animationPlayState),'paused');
  assert.equal(await core.getAttribute('data-module'),'');
  assert.equal(await page.evaluate(()=>window.fixtureWrites||0),0);
@@ -111,6 +112,6 @@ const labels={materials:'风口选题',scripts:'拍摄辅助',video:'视频制�
   assert.ok(await mobileDemo.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  }
  await mobileDemo.close();assert.deepEqual(requests,[]);assert.deepEqual(errors,[]);
- console.log('PASS: four module poses and matching paths, measured direction, short-angle rotation, mixed keyboard/pointer priority, responsive aim, continuous spin pause, reduced motion, immediate navigation, no cloud writes, offline interactive preview.');
+ console.log('PASS: four module poses and matching paths, measured direction, fixed frame and single cancellable ripple, mixed keyboard/pointer priority, responsive aim, breathing pause, reduced motion, immediate navigation, no cloud writes, offline interactive preview.');
  }finally{await browser.close()}
 })().catch(error=>{console.error(error);process.exitCode=1});
