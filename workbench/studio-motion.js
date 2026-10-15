@@ -14,6 +14,8 @@
   let preference = true;
   let activeView = 'home';
   let hoveredRoute = '';
+  let inputMode = 'keyboard';
+  let linkedRoute = '';
   let tiltFrame = 0;
   let tiltPoint = null;
   try { preference = localStorage.getItem(storageKey) !== 'off'; } catch (_) {}
@@ -143,10 +145,51 @@
     core?.style.removeProperty('--core-ry');
   }
 
+  const moduleLabels = {
+    materials:['风口选题','DISCOVER'], scripts:['拍摄辅助','CREATE'],
+    video:['视频制作','PRODUCE'], schedule:['发布日历','PUBLISH']
+  };
+
+  function connectNodes() {
+    const svg = network?.querySelector('.network-lines');
+    const box = svg?.getBoundingClientRect();
+    const center = core?.getBoundingClientRect();
+    if (!box?.width || !box.height || !center?.width) return;
+    const {width, height} = svg.viewBox.baseVal;
+    const x = (center.left + center.width/2 - box.left) * width/box.width;
+    const y = (center.top + center.height/2 - box.top) * height/box.height;
+    network.querySelectorAll('.network-node[data-route]').forEach(node => {
+      const target = node.querySelector('.node-orb').getBoundingClientRect();
+      const tx = (target.left + target.width/2 - box.left) * width/box.width;
+      const ty = (target.top + target.height/2 - box.top) * height/box.height;
+      const bend = (tx-x)*.48;
+      const curve = `M${x} ${y}C${x+bend} ${y} ${tx-bend} ${ty} ${tx} ${ty}`;
+      network.querySelectorAll('[data-network-route="'+node.dataset.route+'"]').forEach(path => path.setAttribute('d',curve));
+    });
+  }
+
+  function aim(route) {
+    const node = network?.querySelector('.network-node[data-route="'+route+'"] .node-orb');
+    const center = core?.getBoundingClientRect();
+    if (!node || !center?.width) return;
+    const target = node.getBoundingClientRect();
+    const dx = target.left+target.width/2-center.left-center.width/2;
+    const dy = target.top+target.height/2-center.top-center.height/2;
+    const length = Math.hypot(dx,dy) || 1;
+    // Move a soft pool of light toward the node; the frame never rotates.
+    core.style.setProperty('--glow-x',(dx/length*center.width*.32).toFixed(2)+'px');
+    core.style.setProperty('--glow-y',(dy/length*center.height*.32).toFixed(2)+'px');
+    core.style.setProperty('--orb-x',(dx/length*4).toFixed(2)+'px');
+    core.style.setProperty('--orb-y',(dy/length*4).toFixed(2)+'px');
+    core.style.setProperty('--light-x',(dx/length*19).toFixed(2)+'px');
+    core.style.setProperty('--light-y',(dy/length*19).toFixed(2)+'px');
+  }
+
   function highlight() {
     const focused = network?.contains(document.activeElement)
-      ? document.activeElement.closest('[data-route]')?.dataset.route : '';
-    const route = activeView === 'home' ? focused || hoveredRoute : '';
+      ? document.activeElement.closest('.network-node[data-route]')?.dataset.route : '';
+    const intended = inputMode==='pointer' ? hoveredRoute || focused : focused || hoveredRoute;
+    const route = activeView === 'home' ? intended || '' : '';
     network?.querySelectorAll('[data-network-route]').forEach(path => {
       path.classList.toggle('is-linked', path.dataset.networkRoute === route);
     });
@@ -154,6 +197,33 @@
       node.classList.toggle('is-linked', node.dataset.route === route);
     });
     core?.classList.toggle('is-linked', !!route);
+    if(core)core.dataset.module=route;
+    if(route)aim(route);
+    else if(core){
+      for(const property of ['--glow-x','--glow-y','--orb-x','--orb-y','--light-x','--light-y'])core.style.removeProperty(property);
+    }
+    if(route!==linkedRoute){
+      linkedRoute=route;
+      // One response per selection, cancelled when selection changes rapidly.
+      if(core){
+        stop(core);
+        if(route){
+          play(core.querySelector('.core-response'),
+            [{opacity:0,transform:'scale(.72)'},{opacity:.65,offset:.25},{opacity:0,transform:'scale(1.1)'}],
+            {duration:1150},core);
+          play(core.querySelector('.orb-center'),
+            [{transform:'scale(1)'},{transform:'scale(1.09)',offset:.35},{transform:'scale(1)'}],
+            {duration:850},core);
+        }
+      }
+      const title=document.getElementById('coreModuleLabel');
+      const subtitle=document.getElementById('coreModuleSub');
+      if(title)title.textContent=moduleLabels[route]?.[0] || '灵感，在这里生长';
+      if(subtitle)subtitle.textContent=moduleLabels[route]?.[1] || 'CONTENT STUDIO';
+      play(core?.querySelector('.core-label'),
+        [{opacity:.4,transform:'translateY(3px)'},{opacity:1,transform:'translateY(0)'}],
+        {duration:220},core);
+    }
   }
 
   function sync() {
@@ -182,6 +252,7 @@
     resetTilt();
     highlight();
     sync();
+    if(view === 'home')connectNodes();
     refresh(view, true);
   }
 
@@ -202,11 +273,27 @@
 
   network?.addEventListener('pointerover', event => {
     if (event.pointerType !== 'mouse') return;
-    hoveredRoute = event.target.closest('.network-node')?.dataset.route || '';
-    highlight();
+    const route = event.target.closest('.network-node')?.dataset.route;
+    if(!route)return;
+    inputMode='pointer';hoveredRoute=route;highlight();
   });
   network?.addEventListener('pointerleave', () => { hoveredRoute = ''; resetTilt(); highlight(); });
-  network?.addEventListener('focusin', highlight);
+  network?.addEventListener('focusin', event => {
+    if(event.target.matches(':focus-visible'))inputMode='keyboard';
+    highlight();
+  });
+  network?.addEventListener('keydown', event => {
+    if(event.key==='Tab'){inputMode='keyboard';highlight();}
+  });
+  if(network && typeof ResizeObserver==='function'){
+    const observer = new ResizeObserver(()=>{
+      if(activeView!=='home')return;
+      connectNodes();
+      if(linkedRoute)aim(linkedRoute);
+    });
+    observer.observe(network);
+    network.querySelectorAll('.network-node').forEach(node=>observer.observe(node));
+  }
   network?.addEventListener('focusout', () => queueMicrotask(highlight));
   network?.addEventListener('pointermove', event => {
     if (!enabled() || activeView !== 'home' || !pointer.matches || event.pointerType !== 'mouse') return;
@@ -222,5 +309,6 @@
 
   window.StudioMotion = {enter, refresh, enabled, region, snapshot, settle, selection, dialog};
   sync();
+  connectNodes();
   refresh('home', true);
 })();

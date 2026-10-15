@@ -104,7 +104,7 @@
       <div class="stage-intro"><p class="eyebrow">THE FIFTH SEASON · STUDIO</p><h3>让每一个灵感，<br>都有下一步<span>。</span></h3><p class="stage-description">从发现风向，到作品发布。<br>把好内容，一点点做出来。</p><div class="stage-status" id="homeLoadState" role="status"><i></i>正在连接你的创作空间</div><button class="stage-link" data-route="progress">查看创作进度 <span>↗</span></button></div>
       <div class="creative-network" aria-label="内容创作流程">
         <svg class="network-lines" viewBox="0 0 660 390" preserveAspectRatio="none" aria-hidden="true"><path data-network-route="materials" d="M330 195C250 195 200 85 125 85"/><path class="network-flow" data-network-route="materials" d="M330 195C250 195 200 85 125 85"/><path data-network-route="scripts" d="M330 195C420 195 430 80 535 80"/><path class="network-flow" data-network-route="scripts" d="M330 195C420 195 430 80 535 80"/><path data-network-route="video" d="M330 195C220 195 220 315 130 315"/><path class="network-flow" data-network-route="video" d="M330 195C220 195 220 315 130 315"/><path data-network-route="schedule" d="M330 195C420 195 440 310 535 310"/><path class="network-flow" data-network-route="schedule" d="M330 195C420 195 440 310 535 310"/></svg>
-        <div class="creative-core"><div class="core-track"></div><div class="core-orb"><span class="orb-petal p1"></span><span class="orb-petal p2"></span><span class="orb-petal p3"></span><span class="orb-petal p4"></span><span class="orb-petal p5"></span><span class="orb-center"></span></div><div class="core-label">灵感，在这里生长<small>CONTENT STUDIO</small></div></div>
+        <div class="creative-core" aria-hidden="true"><div class="core-aura"></div><div class="core-track"></div><div class="core-direction"></div><div class="core-response"></div><div class="core-orb"><div class="orb-form"><div class="orb-petals"><span class="orb-petal p1"></span><span class="orb-petal p2"></span><span class="orb-petal p3"></span><span class="orb-petal p4"></span><span class="orb-petal p5"></span></div></div><span class="orb-center"></span><span class="orb-light"></span></div><div class="core-label"><span id="coreModuleLabel">灵感，在这里生长</span><small id="coreModuleSub">CONTENT STUDIO</small></div></div>
         <button class="network-node node-top-left" data-route="materials"><span class="node-orb">✦</span><span class="node-caption"><span><b id="homeMaterialCount">—</b> 个灵感</span><strong>风口选题 <em>↗</em></strong><small>DISCOVER</small></span></button>
         <button class="network-node node-top-right" data-route="scripts"><span class="node-orb">✎</span><span class="node-caption"><span><b id="homeScriptCount">—</b> 份脚本</span><strong>拍摄辅助 <em>↗</em></strong><small>CREATE</small></span></button>
         <button class="network-node node-bottom-left" data-route="video"><span class="node-orb">▷</span><span class="node-caption"><span>剪辑 / AI 生成</span><strong>视频制作 <em>↗</em></strong><small>PRODUCE</small></span></button>
@@ -172,15 +172,11 @@
       </div>
     </div>
 
-    <div class="filterbar">
-      <div class="chips" id="accountFilter" role="group" aria-label="按账号筛选选题"></div>
-      <label class="switch">
-        <input type="checkbox" id="onlyLatest" checked />
-        <span>仅看最新一批</span>
-      </label>
-    </div>
-
-    <div class="library-toolbar"><h3>灵感选题库 <span id="materialResultCount"></span></h3><button type="button" class="chip" id="selectedOnly" aria-pressed="false">只看已选</button><label class="studio-search"><span aria-hidden="true">⌕</span><input type="search" id="materialSearch" placeholder="搜索标题、关键词或账号" aria-label="搜索选题" /></label></div>
+    <section class="topic-library-controls" aria-label="筛选灵感选题">
+      <div class="library-toolbar"><div><p class="eyebrow">YOUR IDEA COLLECTION</p><h3>灵感选题库 <span id="materialResultCount"></span></h3></div><label class="studio-search"><span aria-hidden="true">⌕</span><input type="search" id="materialSearch" placeholder="搜索标题、开场或关键词" aria-label="搜索选题" /></label></div>
+      <div class="filterbar"><div class="chips" id="accountFilter" role="group" aria-label="按账号筛选选题"></div></div>
+      <div class="topic-filter-tools"><label class="script-account-field"><span>形式</span><select id="materialForm" aria-label="筛选选题形式"><option value="全部">全部形式</option></select></label><label class="script-account-field"><span>脚本</span><select id="materialStatus" aria-label="筛选选题脚本状态"><option value="all">全部状态</option><option value="unwritten">待写脚本</option><option value="written">已有脚本</option></select></label><button type="button" class="chip" id="selectedOnly" aria-pressed="false">只看已选</button><label class="switch"><input type="checkbox" id="onlyLatest" checked /><span>仅看最新一批</span></label><button type="button" class="text-button" id="materialClear" hidden>清除筛选</button></div>
+    </section>
     <div class="grid" id="materialGrid"></div>
     <div class="empty" id="materialEmpty" hidden>
       还没有素材。点右上角「同步联网风向」载入本季风向选题，或「生成新的视频计划」让 AI 按热点出新一批。
@@ -213,11 +209,12 @@
 
       <div class="col-right">
         <div class="panel-head">
-          <h2>脚本库</h2>
+          <div><p class="eyebrow">YOUR SCRIPT COLLECTION</p><h2>脚本库</h2></div>
           <span class="hint" id="scriptMeta"></span>
         </div>
         <div class="script-tools"><label class="studio-search"><span aria-hidden="true">⌕</span><input type="search" id="scriptSearch" placeholder="搜索标题、正文或账号" aria-label="搜索脚本" /></label><label class="script-account-field"><span>账号</span><select id="scriptAccount" aria-label="筛选脚本账号"><option value="全部">全部账号</option></select></label></div>
         <div class="chips script-status-filter" id="scriptStatusFilter" role="group" aria-label="筛选脚本状态"></div>
+        <div class="script-result-tools"><label class="script-account-field"><span>排序</span><select id="scriptSort" aria-label="脚本排序"><option value="newest">最近创建</option><option value="oldest">最早创建</option><option value="title">标题顺序</option></select></label><button type="button" class="text-button" id="scriptClear" hidden>清除筛选</button></div>
         <p class="script-scope-note">排期状态以当前批次为准；已排期不代表视频已制作完成。</p>
         <div class="script-list" id="scriptList"></div>
         <div class="empty" id="scriptEmpty" hidden>还没有生成脚本。</div>
@@ -255,6 +252,7 @@ node start-jianying.cjs</code></pre>
         <p class="hint">用法：① 在工作台文件夹下新建文本文件 <code>启动剪映制作.command</code>，把上面三行粘进去；② 首次给一次执行权限：终端运行 <code>chmod +x 启动剪映制作.command</code>；③ 双击运行（或终端 <code>./启动剪映制作.command</code>）。剪映不可用时火山生成仍可使用；启动后本机服务监听 <code>http://127.0.0.1:4191</code>。</p>
       </details>
     </div>
+    <section class="production-preparation" aria-label="提交前准备"><div><p class="eyebrow">READY TO CREATE</p><h3>提交前准备</h3><p class="hint">先备好内容与素材，再开始制作。</p></div><ol id="jyPreparation"></ol></section>
     <form id="jyForm">
       <div class="video-layout">
         <div class="panel video-script-panel">
@@ -299,12 +297,17 @@ node start-jianying.cjs</code></pre>
     </form>
     <div class="panel video-tasks">
       <div class="panel-head"><div><h3>制作任务</h3><p class="hint">查看制作进度、剪映工程与生成的视频。</p></div><button class="btn btn-ghost btn-sm" id="jyRefresh">刷新进度</button></div>
+      <div class="production-task-controls"><div id="jyJobFilters" class="chips" role="group" aria-label="筛选制作任务"></div><label class="studio-search"><span aria-hidden="true">⌕</span><input type="search" id="jyJobSearch" aria-label="搜索制作任务" placeholder="搜索标题、账号或制作方式" /></label></div>
+      <div class="production-task-results"><span id="jyJobCount" role="status" aria-live="polite"></span><button type="button" class="text-button" id="jyJobClear" hidden>清除筛选</button></div>
       <p id="jyPollingStatus" class="hint" role="status">任务状态每5秒自动刷新</p>
+      <div id="jyJobsEmpty" class="empty" hidden>没有匹配的任务，可清除筛选后再查看。</div>
       <div id="jyJobs"><div class="empty">还没有制作任务。提交后会在这里显示进度和结果。</div></div>
     </div>
   </section>
   <!-- ============ 自动排期 ============ -->
   <section class="view" id="view-schedule">
+    <div class="studio-page-heading"><div><p class="eyebrow">MAKE ROOM FOR GOOD CONTENT</p><h2>拍摄与发布，安排得刚刚好<span class="title-dot">.</span></h2><p>这一周，哪天拍、哪天发，都在这里。</p></div><button class="btn btn-ghost" data-route="scripts">查看脚本库 ↗</button></div>
+    <details class="schedule-generator" id="scheduleGenerator"><summary>生成新排期 <span>选择起始日期与周数，安排下一批内容</span></summary>
     <div class="panel">
       <div class="panel-head">
         <div>
@@ -325,16 +328,32 @@ node start-jianying.cjs</code></pre>
           <button class="btn btn-primary" id="btnAutoSchedule">生成排期</button>
         </div>
       </div>
-      <p class="hint" id="scheduleSource">排期范围：已勾选素材</p>
+      <p class="hint">生成范围：已勾选素材；未勾选时使用最新一批素材。</p>
     </div>
 
-    <div id="scheduleBoard"></div>
-    <div class="empty" id="scheduleEmpty" hidden>还没有排期。勾选素材后点「生成排期」。</div>
+    </details>
+    <section class="panel schedule-planner" aria-label="拍摄与发布周历">
+      <div class="schedule-toolbar"><div class="schedule-mode" id="scheduleMode" role="group" aria-label="排期视角"><button type="button" data-schedule-mode="publish" aria-pressed="true">发布安排</button><button type="button" data-schedule-mode="shoot" aria-pressed="false">拍摄安排</button></div><label class="script-account-field"><span>账号</span><select id="scheduleAccount" aria-label="筛选排期账号"><option value="全部">全部账号</option></select></label></div>
+      <div class="schedule-week-heading"><div><p class="eyebrow" id="scheduleModeLabel">PUBLISHING WEEK</p><h3 id="scheduleWeekLabel"></h3><p class="hint" id="scheduleSource">正在读取排期…</p></div><div class="calendar-nav"><button class="btn btn-ghost btn-sm" id="schedulePrev" aria-label="排期上一周">←</button><button class="btn btn-ghost btn-sm" id="scheduleToday">本周</button><button class="btn btn-ghost btn-sm" id="scheduleNext" aria-label="排期下一周">→</button></div></div>
+      <div class="schedule-overview" id="scheduleOverview" aria-live="polite"></div>
+      <p class="schedule-legend" id="scheduleLegend"></p>
+      <div class="schedule-no-week" id="scheduleNoWeek" hidden><p>这一周没有匹配的安排。</p><button class="text-button" id="scheduleNearest">查看最近排期 ↗</button><button class="text-button" id="scheduleClear">查看全部账号</button></div>
+      <div id="scheduleBoard" class="schedule-week-grid"></div>
+      <div id="scheduleUndated" class="schedule-undated" hidden></div>
+    </section>
+    <div class="empty" id="scheduleEmpty" hidden>还没有排期。展开「生成新排期」，安排第一批内容。</div>
   </section>
 
   <!-- ============ ④ 进度看板 ============ -->
   <section class="view" id="view-progress">
-
+    <div class="studio-page-heading"><div><p class="eyebrow">CREATIVE MOMENTUM</p><h2>让每一步，都有下一步<span class="title-dot">.</span></h2><p>看清正在推进的内容，把需要处理的事接着做完。</p></div></div>
+    <section class="progress-actions-panel" aria-label="接下来处理">
+      <div class="panel-head"><div><p class="eyebrow">YOUR NEXT STEPS</p><h3>接下来处理</h3><p class="hint">脚本来自已选选题；日期与发布待办来自当前排期批次，同一内容可出现在不同类别。</p></div></div>
+      <div id="progressQueues" class="progress-queues" role="group" aria-label="待办类别"></div>
+      <p id="progressQueueHint" class="progress-queue-hint" role="status" aria-live="polite"></p>
+      <div id="progressTasks" class="progress-tasks"></div>
+      <div class="progress-task-pager"><span id="progressTaskCount"></span><button class="text-button" id="progressMore" hidden>再看 6 条 ↓</button></div>
+    </section>
     <div class="panel">
       <div class="panel-head">
         <div>
@@ -350,12 +369,12 @@ node start-jianying.cjs</code></pre>
     <div class="kpis" id="progressKpis"></div>
 
     <div class="panel">
-      <div class="panel-head"><div><h2>生产漏斗</h2><p class="hint">从选题到发布，看每一环漏了多少</p></div></div>
+      <div class="panel-head"><div><h2>创作阶段概览</h2><p class="hint">各环节的当前数量，帮助安排下一步工作</p></div></div>
       <div class="funnel" id="progressFunnel"></div>
     </div>
 
     <div class="panel">
-      <div class="panel-head"><div><h2>账号节奏达成率（本周）</h2><p class="hint">目标来自账号矩阵配比；「已发布」以「数据看板」录入的记录为准</p></div></div>
+      <div class="panel-head"><div><h2>本周录入与发布目标</h2><p class="hint">按上海时间统计本周发布日期；已录入数量不等于平台核验的发布数量</p></div></div>
       <div class="rate-list" id="progressRates"></div>
     </div>
 
@@ -379,7 +398,12 @@ node start-jianying.cjs</code></pre>
   <!-- ============ ⑤ 数据看板 ============ -->
   <section class="view" id="view-data">
 
-    <div class="studio-page-heading"><div><p class="eyebrow">CONTENT ANALYTICS</p><h2>每一次发布，都有回响<span class="title-dot">.</span></h2><p>看见内容的表现，找到下一次创作的方向。</p></div><label class="inline-field">账号 <select id="dataFilter"><option value="全部">全部</option></select></label></div>
+    <div class="studio-page-heading"><div><p class="eyebrow">CONTENT ANALYTICS</p><h2>每一次发布，都有回响<span class="title-dot">.</span></h2><p>看见内容的表现，找到下一次创作的方向。</p></div></div>
+    <section class="analytics-controls" aria-label="数据复盘范围">
+      <div class="analytics-controls-head"><div><p class="eyebrow">REVIEW YOUR CONTENT</p><h3>这一次，复盘哪些作品？</h3></div><label class="studio-search"><span aria-hidden="true">⌕</span><input id="dataSearch" type="search" aria-label="搜索作品数据" placeholder="搜索作品标题、平台或备注" /></label></div>
+      <div class="analytics-controls-tools"><div class="chips" role="group" aria-label="发布日期范围"><button class="chip is-active" data-data-period="all" aria-pressed="true">全部时间</button><button class="chip" data-data-period="7" aria-pressed="false">近 7 天</button><button class="chip" data-data-period="30" aria-pressed="false">近 30 天</button><button class="chip" data-data-period="undated" aria-pressed="false">未填日期</button></div><label class="script-account-field"><span>账号</span><select id="dataFilter"><option value="全部">全部账号</option></select></label><button class="text-button" id="dataClear" hidden>清除筛选</button></div>
+      <p id="dataScope" class="analytics-scope" role="status" aria-live="polite"></p>
+    </section>
     <div class="panel">
       <div class="panel-head">
         <div>
@@ -433,15 +457,14 @@ node start-jianying.cjs</code></pre>
         <div><h2>逐条明细</h2>
           <p class="hint">达标线（行业经验值，可用自己账号历史校准）：3 秒完播 ≥40% · 5 秒完播 ≥25% · 商品点击 ≥3%</p>
         </div>
-        <div class="panel-actions">
-
-        </div>
+        <label class="script-account-field"><span>明细排序</span><select id="dataSort"><option value="newest">最近发布</option><option value="views">播放量优先</option><option value="retention">3 秒完播优先</option></select></label>
       </div>
-      <div class="table-wrap" id="dataTable"></div>
+      <p class="analytics-table-hint">明细可横向滚动，查看互动、转化与编辑入口。</p>
+      <div class="table-wrap" id="dataTable" tabindex="0" role="region" aria-label="作品数据明细，可横向滚动"></div>
     </div>
 
     <div class="panel">
-      <div class="panel-head"><div><h2>选题回溯</h2><p class="hint">哪类选题真的跑得动 —— 用来反哺「素材选择库」的下一轮刷新方向</p></div></div>
+      <div class="panel-head"><div><h2>选题回溯</h2><p class="hint">按 3 秒完播率排序，播放量用于同分排序；可回看已关联的选题与脚本。</p></div></div>
       <div class="rank-list" id="dataRank"></div>
     </div>
   </section>
@@ -623,6 +646,7 @@ node start-jianying.cjs</code></pre>
 <script src="./account-settings.js"></script>
 <script src="./jy-catalog.js"></script>
 <script src="./edit-plan.js"></script>
+<script src="./production-workflow.js"></script>
 <script src="./jianying-studio.js"></script>
 </body>
 </html>

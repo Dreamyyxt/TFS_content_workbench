@@ -1,7 +1,7 @@
 /* Production UI: Jianying edits real media; Volcengine generates from confirmed scripts. */
 (() => {
   const $=id=>document.getElementById(id), base='http://127.0.0.1:4191/api/jianying/';
-  let musicAsset=null;
+  let musicAsset=null,serviceReady=false,latestJobs=[],jobFilter='all',jobQuery='';
   let token='',assets=[],source={},busy=false,mode='edit',requestId=null,jobsSignature='',refreshing=false,generation={ready:false},device={online:false};
   const thumbs=new Map(),outputs=new Map();
   const message=(text,error=false)=>{$('jyMessage').textContent=text;$('jyMessage').style.color=error?'var(--danger)':'';};
@@ -15,17 +15,41 @@
     if(!r.ok){const e=await r.json().catch(()=>({}));throw Error(e.error || '请求失败 '+r.status);}return r;
   }
   const post=(route,body)=>api(route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
+  function renderPreparation(){
+    const steps=ProductionWorkflow.preparation({mode,title:$('jyTitle').value,script:$('jyScript').value,narration:$('jyNarration').value,voice:$('jyVoiceMode').value,assets,music:$('jyMusicMode').value,hasMusic:!!musicAsset,connected:serviceReady,editReady:!!device.online&&!!device.device?.ready,generationReady:!!generation.ready});
+    $('jyPreparation').replaceChildren(...steps.map(step=>{
+      const li=document.createElement('li');li.className=step.ready?'is-ready':'';
+      const mark=document.createElement('span');mark.className='production-ready-mark';mark.textContent=step.ready?'✓':'○';mark.setAttribute('aria-hidden','true');
+      const copy=document.createElement('div'),title=document.createElement('strong'),detail=document.createElement('p');title.textContent=step.label;detail.textContent=step.detail;copy.append(title,detail);li.append(mark,copy);return li;
+    }));
+  }
+  function filterJobs(){
+    const focusedFilter=document.activeElement?.dataset.jobFilter;
+    const counts={all:latestJobs.length,active:0,draft:0,finished:0,attention:0};latestJobs.forEach(job=>counts[ProductionWorkflow.group(job)]++);
+    $('jyJobFilters').replaceChildren(...[['all','全部'],['active','制作中'],['draft','待导出'],['finished','成片就绪'],['attention','需处理']].map(([key,label])=>{
+      const b=document.createElement('button');b.type='button';b.className='chip'+(jobFilter===key?' is-active':'');b.dataset.jobFilter=key;b.setAttribute('aria-pressed',String(jobFilter===key));b.textContent=label;
+      const count=document.createElement('small');count.textContent=counts[key];b.append(count);return b;
+    }));
+    const visible=latestJobs.filter(job=>ProductionWorkflow.matches(job,{status:jobFilter,query:jobQuery}));
+    const ids=new Set(visible.map(job=>String(job.id)));
+    $('jyJobs').querySelectorAll('.jy-job').forEach(card=>card.hidden=!ids.has(card.dataset.jobId));
+    $('jyJobCount').textContent='显示 '+visible.length+' / '+latestJobs.length+' 个任务';
+    $('jyJobClear').hidden=jobFilter==='all'&&!jobQuery.trim();
+    $('jyJobsEmpty').hidden=!latestJobs.length||!!visible.length;
+    if(focusedFilter)[...$('jyJobFilters').children].find(el=>el.dataset.jobFilter===focusedFilter)?.focus({preventScroll:true});
+  }
   function connection(){
     const genText=generation.ready?'火山方舟已连接 · 将根据拍摄脚本生成视频'
       :(!arkKey()?'未配置火山方舟密钥 —— 点上方「🔑 火山密钥」粘贴一次即可':(generation.error || '正在检查火山连接…'));
-    const text=mode==='edit'?(device.online?(device.device.ready?'剪映已连接 · Skill '+device.device.skill_version:'剪映未就绪：'+device.device.error):'剪映执行器离线，请启动本机制作服务。'):genText;
-    $('jyStatus').textContent=text;$('jyStatus').classList.toggle('is-error',mode==='edit'?!device.online || !device.device?.ready:!generation.ready);
+    const text=!serviceReady?'请连接本机制作服务。':mode==='edit'?(device.online?(device.device.ready?'剪映已连接 · Skill '+device.device.skill_version:'剪映未就绪：'+device.device.error):'剪映执行器离线，请启动本机制作服务。'):genText;
+    renderPreparation();
+    $('jyStatus').textContent=text;$('jyStatus').classList.toggle('is-error',!serviceReady||(mode==='edit'?!device.online || !device.device?.ready:!generation.ready));
   }
   async function connect(){
     $('jyConnect').disabled=true;
     try{const r=await fetch(base+'session',{headers:{'X-Jianying-Studio':'1'},signal:AbortSignal.timeout(4000)});if(!r.ok)throw Error('制作服务未就绪');token=(await r.json()).token;
       await Promise.all([refresh(),api('generation/status').then(r=>r.json()).then(data=>{generation=data;})]);connection();$('jyConnect').textContent='重新连接';
-    }catch(e){$('jyStatus').textContent='未连接本机制作服务 —— 请在这台电脑运行「启动剪映制作.command」（展开上方说明可复制脚本），并允许浏览器访问本地网络。';$('jyStatus').classList.add('is-error');}
+    }catch(e){serviceReady=false;renderPreparation();$('jyStatus').textContent='未连接本机制作服务 —— 请在这台电脑运行「启动剪映制作.command」（展开上方说明可复制脚本），并允许浏览器访问本地网络。';$('jyStatus').classList.add('is-error');}
     finally{$('jyConnect').disabled=false;}
   }
   function setMode(next){
@@ -62,6 +86,7 @@
     li.append(box);
   }
   function renderAssets(){
+    renderPreparation();
     $('jyAssets').replaceChildren();$('jyAssetCount').textContent=assets.length+' 个';
     assets.forEach((asset,i)=>{const li=document.createElement('li');
       let thumb;
@@ -98,9 +123,10 @@
   $('jyFiles').onchange=e=>upload([...e.target.files]);
   const drop=$('jyDropzone');drop.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('jyFiles').click();}};
   drop.ondragover=e=>{e.preventDefault();drop.classList.add('is-dragging');};drop.ondragleave=()=>drop.classList.remove('is-dragging');drop.ondrop=e=>{e.preventDefault();drop.classList.remove('is-dragging');upload([...e.dataTransfer.files]);};
-  $('jyImport').onchange=async e=>{const file=e.target.files[0];if(!file)return;if(file.size>120000){message('脚本文件过大',true);return;}$('jyScript').value=(await file.text()).slice(0,30000);source={};$('jySource').textContent='外部脚本 · '+file.name;requestId=null;e.target.value='';};
-  window.addEventListener('jianying-script',e=>{source={script_id:e.detail.id,content_id:e.detail.material_id || e.detail.id,account:e.detail.account};$('jyTitle').value=e.detail.title || '美甲作品';$('jyScript').value=e.detail.content || '';$('jySource').textContent='来自拍摄辅助 · '+(e.detail.account || '')+' · '+(e.detail.title || '');requestId=null;});
-  $('jyForm').addEventListener('input',()=>requestId=null);
+  $('jyImport').onchange=async e=>{const file=e.target.files[0];if(!file)return;if(file.size>120000){message('脚本文件过大',true);return;}$('jyScript').value=(await file.text()).slice(0,30000);source={};$('jySource').textContent='外部脚本 · '+file.name;requestId=null;e.target.value='';renderPreparation();};
+  window.addEventListener('jianying-script',e=>{source={script_id:e.detail.id,content_id:e.detail.material_id || e.detail.id,account:e.detail.account};$('jyTitle').value=e.detail.title || '美甲作品';$('jyScript').value=e.detail.content || '';$('jySource').textContent='来自拍摄辅助 · '+(e.detail.account || '')+' · '+(e.detail.title || '');requestId=null;renderPreparation();});
+  $('jyForm').addEventListener('input',()=>{requestId=null;renderPreparation();});
+  $('jyForm').addEventListener('change',renderPreparation);
   /* 把一条失败的剪辑任务还原回表单，供「重新生成方案并重试」使用。
      为什么要还原而不是直接调 retry：retry 接口只是把**旧方案**重新排队，
      而剪辑失败基本都是方案本身不合格（口播超长、镜头超出素材长度），
@@ -124,6 +150,7 @@
     /* 时长下拉是 setMode 重建的，所以要在 setMode 之后才设得进去 */
     if(job.duration&&[...$('jyDuration').options].some(x=>Number(x.value)===Number(job.duration)))$('jyDuration').value=String(job.duration);
     source={};
+    renderPreparation();
     requestId=null;   /* 关键：不重置会被服务端按 request_id 判成重复任务、原样退回旧任务 */
   }
   $('jyForm').onsubmit=async e=>{e.preventDefault();if(busy)return;if(!token){message('请先连接制作服务',true);return;}if(mode==='edit'&&!assets.length){message('剪辑需要上传至少一张照片或一个视频。',true);$('jyDropzone').focus();return;}if(mode==='generate'&&assets.some(a=>a.type!=='image')){message('生成模式请移除本地视频；如需视频参考，请填写公网视频链接。',true);return;}
@@ -166,35 +193,39 @@
   function button(label,fn){const b=document.createElement('button');b.type='button';b.className='btn btn-ghost btn-sm';b.textContent=label;b.onclick=async()=>{b.disabled=true;try{await fn();}catch(e){message(e.message,true);}finally{b.disabled=false;}};return b;}
   async function output(job){if(!outputs.has(job.id)){const blob=await(await api('jobs/'+job.id+'/final')).blob();outputs.set(job.id,URL.createObjectURL(blob));}return outputs.get(job.id);}
   function renderJobs(jobs){
+    latestJobs=jobs;
     const tick=jobs.some(j=>['building','queued','submitting','generating','downloading'].includes(j.status))?Math.floor(Date.now()/5000):'';
     const signature=JSON.stringify(jobs.map(({lease_until,...job})=>job))+tick;if(signature===jobsSignature)return;jobsSignature=signature;
+    const focused=document.activeElement,focusedCard=focused?.closest('.jy-job');
+    const focusIndex=focusedCard?[...focusedCard.querySelectorAll('button,input,summary,a')].indexOf(focused):-1;
     const previous=new Map([...$('jyJobs').querySelectorAll('.jy-job')].map(card=>[card.dataset.jobId,card]));
     const cards=[];
     $('badgeVideo').textContent=jobs.length;$('badgeVideo').dataset.zero=jobs.length?'0':'1';
-    if(!jobs.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='还没有制作任务。提交后会在这里显示进度和结果。';$('jyJobs').replaceChildren(empty);return;}
+    if(!jobs.length){const empty=document.createElement('div');empty.className='empty';empty.textContent='还没有制作任务。提交后会在这里显示进度和结果。';$('jyJobs').replaceChildren(empty);filterJobs();return;}
     for(const job of [...jobs].reverse()){
-      const oldCard=previous.get(job.id),cardSignature=JSON.stringify(job)+(['building','queued','submitting','generating','downloading'].includes(job.status)?tick:'');
+      const oldCard=previous.get(String(job.id)),cardSignature=JSON.stringify(job)+(['building','queued','submitting','generating','downloading'].includes(job.status)?tick:'');
       if(oldCard?.dataset.signature===cardSignature){cards.push(oldCard);continue;}
       const opened=new Set(oldCard?[...oldCard.querySelectorAll('details[open]')].map(d=>d.dataset.section):[]);
-      const card=document.createElement('article');card.className='jy-job';card.dataset.jobId=job.id;card.dataset.signature=cardSignature;const head=document.createElement('div');head.className='video-job-head';const info=document.createElement('div'),title=document.createElement('h4');title.textContent=job.title;info.append(title);
+      const card=document.createElement('article');card.className='jy-job';card.dataset.jobId=job.id;card.dataset.signature=cardSignature;card.dataset.jobStatus=job.status;card.tabIndex=-1;const head=document.createElement('div');head.className='video-job-head';const info=document.createElement('div'),title=document.createElement('h4');title.textContent=job.title;info.append(title);
       const summary=document.createElement('p');summary.className='video-job-meta';summary.textContent=(job.mode==='generate'?'AI 生成':'剪映剪辑')+' · '+job.duration+' 秒 · '+(job.assets.length+(job.reference_videos || []).length)+' 个素材'+(job.script_id?' · 关联拍摄脚本':'');info.append(summary);head.append(info);
       const status=document.createElement('span');status.className='video-job-status'+(['failed','submission_unknown'].includes(job.status)?' is-failed':['finished','draft_ready'].includes(job.status)?' is-done':'');status.textContent=labels[job.status] || job.status;head.append(status);card.append(head);
+      const next=document.createElement('p');next.className='production-next-step';next.textContent=ProductionWorkflow.nextStep(job);card.append(next);
       if(job.mode!=='generate'&&job.edit_plan){const stage=document.createElement('p');stage.className='video-job-meta';stage.textContent=(job.edit_stage||'等待剪映执行器')+(job.updated_at?' · 更新于 '+new Date(job.updated_at).toLocaleTimeString():'');card.append(stage);
         const warns=(job.edit_report&&job.edit_report.warnings)||[];
         if(warns.length){const w=document.createElement('p');w.className='hint';w.textContent='已丢弃 '+warns.length+' 项无效视觉设置：'+warns.slice(0,3).join('；')+(warns.length>3?' 等':'')+'。工程照常生成，细节见下方执行结果。';card.append(w);}
-        const details=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');summary.textContent='剪辑方案与执行结果';pre.className='video-prompt';pre.textContent=JSON.stringify({plan:job.edit_plan,options:job.edit_options,report:job.edit_report},null,2);details.append(summary,pre);card.append(details);}
+        const details=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');details.dataset.section='edit';details.open=opened.has('edit');summary.textContent='剪辑方案与执行结果';pre.className='video-prompt';pre.textContent=JSON.stringify({plan:job.edit_plan,options:job.edit_options,report:job.edit_report},null,2);details.append(summary,pre);card.append(details);}
       if(job.mode==='generate'){
         const active=['queued','submitting','generating','downloading'].includes(job.status);
         const progress=document.createElement('div');progress.className='video-progress';
         const stages=['等待提交','火山生成','取回文件','可预览'];
         const step=job.status==='finished'?3:job.status==='downloading'?2:job.remote_id?1:0;
         const list=document.createElement('ol');list.setAttribute('aria-label','制作阶段');
-        stages.forEach((label,i)=>{const li=document.createElement('li');li.textContent=label;li.className=i<step?'is-complete':i===step?'is-current':'';if(i===step)li.setAttribute('aria-current','step');list.append(li);});progress.append(list);
+        stages.forEach((label,i)=>{const li=document.createElement('li');li.textContent=label;li.className=i<step?'is-complete':i===step&&(active||job.status==='finished')?'is-current':'';if(i===step&&(active||job.status==='finished'))li.setAttribute('aria-current','step');list.append(li);});progress.append(list);
         const detail=document.createElement('p');detail.className='video-progress-detail';
         const seconds=Math.max(0,Math.floor((Date.parse(job.finished_at || new Date().toISOString())-Date.parse(job.created_at))/1000));
         const elapsed=seconds<60?seconds+'秒':Math.floor(seconds/60)+'分'+seconds%60+'秒';
         const remote={queued:'火山排队中',running:'火山正在生成画面与声音',succeeded:'火山生成成功',failed:'火山生成失败',expired:'火山任务已过期',cancelled:'任务已取消'};
-        detail.textContent=(remote[job.remote_status] || labels[job.status])+' · '+(active?'已等待 ':'总耗时 ')+elapsed+(job.last_checked_at?' · 最近查询 '+new Date(job.last_checked_at).toLocaleTimeString('zh-CN',{hour12:false}):'');
+        detail.textContent=(remote[job.remote_status] || labels[job.status])+' · '+(active?'已等待 '+elapsed:job.finished_at?'总耗时 '+elapsed:'创建于 '+new Date(job.created_at).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}))+(job.last_checked_at?' · 最近查询 '+new Date(job.last_checked_at).toLocaleTimeString('zh-CN',{hour12:false}):'');
         progress.append(detail);
         if(active){const note=document.createElement('p');note.className='hint';note.textContent='每5秒自动查询。火山未提供完成百分比，当前显示真实阶段。';progress.append(note);}
         card.append(progress);
@@ -212,7 +243,7 @@
         restoreEditJob(job);message('已还原这条任务的输入，正在重新生成剪辑方案…');$('jyForm').requestSubmit();
       }));}
       if(job.status==='submission_unknown'){
-        const form=document.createElement('div');form.className='video-reconcile';const input=document.createElement('input');input.placeholder='控制台中的 cgt- 任务 ID';input.setAttribute('aria-label','火山任务 ID');form.append(input,button('继续查询',async()=>{await post('jobs/'+job.id+'/reconcile',{remote_id:input.value.trim()});await refresh();}));card.append(form);
+        const form=document.createElement('div');form.className='video-reconcile';const input=document.createElement('input');input.placeholder='控制台中的 cgt- 任务 ID';input.setAttribute('aria-label','火山任务 ID');input.value=oldCard?.querySelector('.video-reconcile input')?.value||'';form.append(input,button('继续查询',async()=>{await post('jobs/'+job.id+'/reconcile',{remote_id:input.value.trim()});await refresh();}));card.append(form);
       }
       if(job.draft_path){
         const details=document.createElement('details');details.dataset.section='draft';details.open=opened.has('draft');const summary=document.createElement('summary');summary.textContent='在剪映中打开工程';details.append(summary);const code=document.createElement('code');code.textContent=job.draft_path;details.append(code);const p=document.createElement('p');p.textContent='剪映“文件 → 找回草稿”选择上述文件夹。脚本和备注保存在 production-notes.md；在剪映内调整并导出 MP4。';details.append(p);card.append(details);
@@ -225,9 +256,14 @@
       }
       if(!actions.childNodes.length)actions.remove();cards.push(card);
     }
-    $('jyJobs').replaceChildren(...cards);
+    $('jyJobs').replaceChildren(...cards);filterJobs();
+    if(focusedCard){const card=cards.find(card=>card.dataset.jobId===focusedCard.dataset.jobId);if(!card||card.hidden){[...$('jyJobFilters').children].find(el=>el.dataset.jobFilter===jobFilter)?.focus({preventScroll:true});}else if(!card.contains(document.activeElement)){(card.dataset.jobStatus===focusedCard.dataset.jobStatus&&focusIndex>=0?card.querySelectorAll('button,input,summary,a')[focusIndex]:card)?.focus({preventScroll:true});}}
   }
-  async function refresh(){if(!token||refreshing)return;refreshing=true;try{const [status,jobs]=await Promise.all([api('status').then(r=>r.json()),api('jobs').then(r=>r.json())]);device=status;connection();renderJobs(jobs);$('jyPollingStatus').textContent='每5秒自动刷新 · 页面最近更新 '+new Date().toLocaleTimeString('zh-CN',{hour12:false});$('jyPollingStatus').style.color='';}finally{refreshing=false;}}
+  async function refresh(){if(!token||refreshing)return;refreshing=true;try{const [status,jobs]=await Promise.all([api('status').then(r=>r.json()),api('jobs').then(r=>r.json())]);device=status;serviceReady=true;connection();renderJobs(jobs);$('jyPollingStatus').textContent='每5秒自动刷新 · 页面最近更新 '+new Date().toLocaleTimeString('zh-CN',{hour12:false});$('jyPollingStatus').style.color='';}catch(error){serviceReady=false;connection();throw error;}finally{refreshing=false;}}
+  $('jyJobSearch').addEventListener('input',event=>{jobQuery=event.target.value;filterJobs();});
+  $('jyJobFilters').addEventListener('click',event=>{const b=event.target.closest('[data-job-filter]');if(!b)return;jobFilter=b.dataset.jobFilter;filterJobs();[...$('jyJobFilters').children].find(el=>el.dataset.jobFilter===jobFilter)?.focus({preventScroll:true});});
+  $('jyJobClear').onclick=()=>{jobFilter='all';jobQuery='';$('jyJobSearch').value='';filterJobs();$('jyJobSearch').focus();};
+  filterJobs();
   $('jyModeEdit').onclick=()=>setMode('edit');$('jyModeGenerate').onclick=()=>setMode('generate');$('jyConnect').onclick=connect;$('jyRefresh').onclick=()=>refresh().catch(e=>message(e.message,true));
   /* 换电脑时复制本机制作服务的启动脚本 */
   const startCopy=$('jyStartCopy');
@@ -237,7 +273,7 @@
     catch(e){const r=document.createRange();r.selectNodeContents($('jyStartCode'));const sel=window.getSelection();sel.removeAllRanges();sel.addRange(r);startCopy.textContent='已选中 · 按 ⌘C 复制';}
     setTimeout(()=>{startCopy.textContent='复制启动脚本';},1800);
   };
-  setInterval(()=>{if($('view-video').classList.contains('is-active'))refresh().catch(()=>{$('jyPollingStatus').textContent='状态刷新失败，请检查本机服务或点击重新连接。';$('jyPollingStatus').style.color='var(--danger)';});},5000);
+  setInterval(()=>{if($('view-video').classList.contains('is-active'))refresh().catch(()=>{serviceReady=false;renderPreparation();$('jyPollingStatus').textContent='状态刷新失败，请检查本机服务或点击重新连接。';$('jyPollingStatus').style.color='var(--danger)';});},5000);
   window.addEventListener('beforeunload',()=>{for(const url of [...thumbs.values(),...outputs.values()])URL.revokeObjectURL(url);});
   /* 供「密钥」弹窗保存火山密钥后立即重新探测连接状态 */
   window.JianyingStudio={reconnect:()=>connect(),refreshStatus:()=>{if(!token)return;api('generation/status').then(r=>r.json()).then(d=>{generation=d;connection();}).catch(()=>{});}};

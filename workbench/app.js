@@ -501,11 +501,17 @@ const S = {
   loaded: false,
   loadError: false,
   search: '',
+  materialForm: '全部',
+  materialStatus: 'all',
   scriptQuery: '',
   scriptAccount: '全部',
   scriptStatus: 'all',
+  scriptSort: 'newest',
   pendingOnly: false,
   homeDay: StudioWorkflow.dayKey(),
+  scheduleDay: null,
+  scheduleMode: 'publish',
+  scheduleAccount: '全部',
   scripts: [],
   schedules: [],
   metrics: [],
@@ -515,6 +521,11 @@ const S = {
   accountConfigRecord:null,accountSettingsLoaded:false,
   filter: '全部',
   dataFilter: '全部',
+  dataQuery: '',
+  dataPeriod: 'all',
+  dataSort: 'newest',
+  progressQueue: 'pending',
+  progressLimit: 6,
   onlyLatest: true,
   selectedOnly: false,
   busy: false,
@@ -686,11 +697,7 @@ function visibleMaterials(){
     const b = latestBatch();
     if (b) list = list.filter(m => m.batch_id === b);
   }
-  if (S.filter !== '全部') list = list.filter(m => m.account === S.filter);
-  if (S.selectedOnly) list = list.filter(m => m.selected);
-  const query = S.search.trim().toLocaleLowerCase();
-  if(query) list = list.filter(m => [m.title,m.keywords,m.account,m.angle,m.hook].join(' ').toLocaleLowerCase().includes(query));
-  return list;
+  return StudioWorkflow.filterMaterials(list,S.scripts,{query:S.search,account:S.filter,selectedOnly:S.selectedOnly,form:S.materialForm,status:S.materialStatus});
 }
 
 /* 相对时间 / 绝对时间 */
@@ -1170,21 +1177,14 @@ async function collectWebTrend(){
 }
 
 function renderFilter(){
-  const counts = {};
-  ACCOUNTS.forEach(a => counts[a.name] = 0);
-  const pool = S.onlyLatest ? S.materials.filter(m => m.batch_id === latestBatch()) : S.materials;
-  pool.forEach(m => { if (counts[m.account] != null) counts[m.account]++; });
-  const total = Object.values(counts).reduce((x,y) => x+y, 0);
-  let html = '<button class="chip' + (S.filter === '全部' ? ' is-active' : '') + '" data-acc="全部" aria-pressed="'+(S.filter==='全部')+'">全部<small>' + total + '</small></button>';
-  ACCOUNTS.forEach(a => {
-    html += '<button class="chip' + (S.filter === a.name ? ' is-active' : '') + '" data-acc="' + esc(a.name) + '" aria-pressed="'+(S.filter===a.name)+'">' +
-      esc(a.name) + '<small>' + counts[a.name] + '</small></button>';
-  });
-  $('#accountFilter').innerHTML = html;
+  const batch=latestBatch();
+  const pool=S.onlyLatest&&batch?S.materials.filter(m=>m.batch_id===batch):S.materials;
+  const names=[...new Set([...ACCOUNTS.map(account=>account.name),...pool.map(row=>row.account)])].filter(Boolean);
+  $('#accountFilter').innerHTML=[['全部',pool.length],...names.map(name=>[name,pool.filter(row=>row.account===name).length])].map(([name,count])=>'<button class="chip'+(S.filter===name?' is-active':'')+'" data-acc="'+esc(name)+'" aria-pressed="'+(S.filter===name)+'">'+esc(name)+'<small>'+count+'</small></button>').join('');
 }
 
 function scriptForMaterial(id){
-  return S.scripts.find(s => s.material_id === id) || null;
+  return S.scripts.find(s => StudioWorkflow.sameId(s.material_id,id)) || null;
 }
 
 function renderMaterials(){
@@ -1199,8 +1199,16 @@ function renderMaterials(){
   const list = visibleMaterials();
   $('#selectedOnly').setAttribute('aria-pressed',String(S.selectedOnly));
   $('#selectedOnly').classList.toggle('is-active',S.selectedOnly);
-  $('#materialResultCount').textContent = list.length + ' 个选题';
-  $('#materialEmpty').textContent = S.selectedOnly ? '当前筛选范围里还没有已选选题。可关闭「只看已选」继续挑选。' : S.search || S.filter !== '全部' ? '没有匹配的选题，试试其他关键词或账号。' : '还没有选题。点击「实时采集风向」获取灵感，或载入趋势底稿。';
+  const batch=latestBatch();
+  const pool=S.onlyLatest&&batch?S.materials.filter(m=>m.batch_id===batch):S.materials;
+  const forms=[...new Set([...pool.map(row=>row.content_form),S.materialForm==='全部'?'':S.materialForm])].filter(Boolean);
+  const options='<option value="全部">全部形式</option>'+forms.map(form=>'<option value="'+esc(form)+'">'+esc(form)+'</option>').join('');
+  if($('#materialForm').innerHTML!==options)$('#materialForm').innerHTML=options;
+  $('#materialForm').value=S.materialForm;$('#materialStatus').value=S.materialStatus;
+  const filtered=!!S.search.trim()||S.filter!=='全部'||S.selectedOnly||S.materialForm!=='全部'||S.materialStatus!=='all';
+  $('#materialClear').hidden=!filtered;
+  $('#materialResultCount').textContent='显示 '+list.length+' / '+pool.length+' 个 · '+(S.onlyLatest?'最新一批':'全部批次');
+  $('#materialEmpty').innerHTML=filtered?'<strong>没有匹配的选题</strong><p>试试其他关键词、账号、形式或脚本状态。</p><button class="btn btn-ghost btn-sm" data-clear-material-filters>清除筛选</button>':'<strong>这里还没有选题</strong><p>可在上方实时采集风向，或载入趋势底稿。</p>';
   if (!list.length){
     grid.innerHTML = '';
     $('#materialEmpty').hidden = false;
@@ -1213,27 +1221,20 @@ function renderMaterials(){
     const acc = ACC_BY_NAME[m.account] || { key:'', platform:m.platform };
     const sc = scriptForMaterial(m.id);
     const kws = String(m.keywords || '').split(/[,，]/).filter(Boolean);
-    return '' +
-    '<article class="card' + (m.selected ? ' is-selected' : '') + (sc ? ' has-script' : '') + '" data-material-id="' + esc(m.id) + '" tabindex="-1">' +
-      '<div class="card-top">' +
-        '<span class="tag tag-account" data-k="' + esc(acc.key) + '">' + esc(m.account) + '</span>' +
-        (m.content_form ? '<span class="tag tag-plain">' + esc(m.content_form) + '</span>' : '') +
-        (m.goal ? '<span class="tag tag-goal">' + esc(m.goal) + '</span>' : '') +
-        (m.priority === 'high' ? '<span class="tag tag-high">重点</span>' : '') +
-        (sc ? '<span class="mini-tag">已有脚本</span>' : '') +
-      '</div>' +
-      '<h3 class="card-title">' + esc(m.title) + '</h3>' +
-      (m.angle ? '<div class="card-line"><b>角度</b><span>' + esc(m.angle) + '</span></div>' : '') +
-      (m.hook ? '<div class="card-line"><b>钩子</b><span>' + esc(m.hook) + '</span></div>' : '') +
-      (kws.length ? '<div class="card-kw">' + kws.map(k => '<span>' + esc(k.trim()) + '</span>').join('') + '</div>' : '') +
-      (m.trend_reason ? '<div class="card-reason">' + esc(m.trend_reason) + '</div>' : '') +
-      '<div class="card-foot">' +
-        '<button type="button" class="pick" aria-pressed="' + !!m.selected + '" aria-disabled="'+(clearingSelection || selectionWrites.has(m.id))+'" data-pick="' + esc(m.id) + '">' +
-          (selectionWrites.has(m.id) ? '保存中…' : m.selected ? '✓ 已加入待制作' : '+ 加入待制作') +
-        '</button>' +
-        '<button class="btn-danger-ghost" data-del="' + m.id + '" title="删除该素材">删除</button>' +
-      '</div>' +
-    '</article>';
+    return '<article class="card topic-card'+(m.selected?' is-selected':'')+(sc?' has-script':'')+'" data-material-id="'+esc(m.id)+'" tabindex="-1">'+
+      '<div class="card-top"><span class="tag tag-account" data-k="'+esc(acc.key)+'">'+esc(m.account)+'</span>'+(m.content_form?'<span class="tag tag-plain">'+esc(m.content_form)+'</span>':'')+(m.priority==='high'?'<span class="tag tag-high">重点</span>':'')+'</div>'+
+      '<h3 class="card-title">'+esc(m.title||'未命名选题')+'</h3>'+
+      '<div class="topic-hook"><span>开场灵感</span><blockquote>'+esc(m.hook||'这条选题还没有填写开场。')+'</blockquote></div>'+
+      '<details class="topic-details"><summary>选题思路与关键词 <span aria-hidden="true">＋</span></summary><div class="topic-details-body">'+
+        (m.angle?'<div class="card-line"><b>角度</b><span>'+esc(m.angle)+'</span></div>':'')+
+        (m.goal?'<div class="card-line"><b>目标</b><span>'+esc(m.goal)+'</span></div>':'')+
+        (m.trend_reason?'<div class="card-reason"><b>选题理由</b>'+esc(m.trend_reason)+'</div>':'')+
+        (kws.length?'<div class="card-kw">'+kws.map(k=>'<span>'+esc(k.trim())+'</span>').join(''):'')+
+        (!m.angle&&!m.goal&&!m.trend_reason&&!kws.length?'<p class="hint">暂无补充思路。</p>':'')+
+        '<button class="btn-danger-ghost" data-del="'+esc(m.id)+'" title="删除该素材">删除选题</button></div></details>'+
+      '<div class="topic-script-state">'+(sc?'<span class="mini-tag">已有脚本</span>':'<span>待写脚本</span>')+'</div>'+
+      '<div class="card-foot"><button type="button" class="pick" aria-pressed="'+!!m.selected+'" aria-disabled="'+(clearingSelection||selectionWrites.has(m.id))+'" data-pick="'+esc(m.id)+'">'+(selectionWrites.has(m.id)?'保存中…':m.selected?'✓ 已加入待制作':'+ 加入待制作')+'</button>'+
+        (sc?'<button class="text-button" data-open-script="'+esc(sc.id)+'">查看脚本 ↗</button>':'')+'</div></article>';
   }).join('');
   window.StudioMotion?.settle(grid,previous,'data-material-id');
   restorePick();
@@ -1348,7 +1349,7 @@ function renderBadges(){
   /* 进度看板角标＝需要处理的待办（未配脚本的排期 + 命中禁用词的脚本） */
   const bp = $('#badgeProgress');
   if (bp){
-    const todo = latestPlanRows().filter(r => !r.script_id).length + countRiskScripts().block;
+    const todo = latestPlanRows().filter(r => !String(scheduleScript(r)?.content||'').trim()).length + countRiskScripts().block;
     bp.textContent = todo;
     bp.dataset.zero = todo ? '0' : '1';
   }
@@ -1629,20 +1630,36 @@ function renderPending(){
   }).join('');
 }
 
+function scriptCardPreview(content){
+  const plan=ShootingPlan.parse(content);
+  if(plan.mode==='shots'){
+    const panels=plan.steps.slice(0,2).map((step,index)=>{
+      const scene=step.fields.find(field=>/画面|运镜|拍摄内容|镜头内容/.test(field.label));
+      const voice=step.fields.find(field=>/口播|台词|旁白/.test(field.label));
+      return '<div class="script-shot"><span class="script-shot-index">'+String(index+1).padStart(2,'0')+'</span><div><span class="script-shot-time">'+esc(step.time||'时间未标注')+'</span><p>'+esc(scene?.text||'该镜头未填写画面')+'</p>'+(voice?.text?'<small>口播 · '+esc(voice.text)+'</small>':'')+'</div></div>';
+    }).join('');
+    return '<div class="script-storyboard"><div class="script-preview-heading"><span>分镜预览</span><small>共 '+plan.steps.length+' 镜 · 展示前 '+Math.min(2,plan.steps.length)+' 镜</small></div><div class="script-shot-grid">'+panels+'</div></div>';
+  }
+  return '<div class="script-storyboard"><div class="script-preview-heading"><span>原文预览</span><small>'+(plan.mode==='empty'?'暂无正文':'打开完整脚本继续阅读')+'</small></div><p class="script-source-excerpt">'+esc(String(content||'').trim().slice(0,500)||'这份脚本还没有正文。')+'</p></div>';
+}
+
 function renderScripts(){
   const box = $('#scriptList');
   const previous = window.StudioMotion?.snapshot(box);
   const rows = latestPlanRows();
   const entries = S.scripts.map(script=>({script,scan:complianceScan(script.content),scheduled:StudioWorkflow.isScriptScheduled(script,rows)}));
   const baseFilter = {query:S.scriptQuery,account:S.scriptAccount};
-  const list = StudioWorkflow.filterScripts(entries,{...baseFilter,status:S.scriptStatus});
+  const list = StudioWorkflow.sortScripts(StudioWorkflow.filterScripts(entries,{...baseFilter,status:S.scriptStatus}),S.scriptSort);
   const accountNames = [...new Set([...ACCOUNTS.map(a=>a.name),...S.scripts.map(s=>s.account)])].filter(Boolean);
   const options = '<option value="全部">全部账号</option>' + accountNames.map(name=>'<option value="'+esc(name)+'">'+esc(name)+'</option>').join('');
   if ($('#scriptAccount').innerHTML !== options) $('#scriptAccount').innerHTML = options;
   $('#scriptAccount').value = S.scriptAccount;
   $('#scriptStatusFilter').innerHTML = [['all','全部'],['unplanned','未排期'],['scheduled','已排期'],['review','需检查']].map(([key,label])=>'<button class="chip'+(S.scriptStatus===key?' is-active':'')+'" type="button" data-script-status="'+key+'" aria-pressed="'+(S.scriptStatus===key)+'">'+label+'<small>'+StudioWorkflow.filterScripts(entries,{...baseFilter,status:key}).length+'</small></button>').join('');
   $('#scriptMeta').textContent = '显示 ' + list.length + ' / ' + S.scripts.length + ' 份';
-  $('#scriptEmpty').textContent = S.scripts.length ? '没有匹配的脚本，试试其他关键词、账号或状态。' : '还没有脚本。从左侧选题生成第一份。';
+  const filtered=!!S.scriptQuery.trim()||S.scriptAccount!=='全部'||S.scriptStatus!=='all';
+  $('#scriptClear').hidden=!filtered;
+  $('#scriptSort').value=S.scriptSort;
+  $('#scriptEmpty').innerHTML = S.scripts.length ? '<strong>没有找到匹配的脚本</strong><p>试试其他关键词、账号或状态。</p><button class="btn btn-ghost btn-sm" data-clear-script-filters>清除筛选</button>' : '<strong>从一个选题，开始第一份脚本</strong><p>选中的选题可以在左侧生成脚本。</p><button class="btn btn-ghost btn-sm" data-route="materials">去选题库 ↗</button>';
   if (!list.length){
     box.innerHTML = '';
     $('#scriptEmpty').hidden = false;
@@ -1653,37 +1670,29 @@ function renderScripts(){
   box.innerHTML = list.map(({script:s,scan:live,scheduled}) => {
     const acc = ACC_BY_NAME[s.account] || { key:'' };
     /* 合规等级实时计算，避免与入库时的旧口径不一致 */
-    const r = live.level;
-    const rLabel = r === 'pass' ? '合规通过' : r === 'warn' ? '有风险提示' : r === 'block' ? '命中禁用词' : '未自检';
+    const hasContent=!!String(s.content||'').trim();
+    const r = hasContent?live.level:'empty';
+    const rLabel = r === 'pass' ? '合规通过' : r === 'warn' ? '有风险提示' : r === 'block' ? '命中禁用词' : r === 'empty' ? '暂无正文' : '未自检';
     const hits = live.hits.length ? live.hits.map(h => h.group + '：' + h.word).join('；') : '无';
     /* 去 AI 味自检：只统计需要改写的 AI 腔 / 广告腔，不含分镜表里的正常排版特征 */
     const tone = humanTone(s.content);
     const toneN = humanToneCount(tone);
     const toneBrief = humanToneBrief(tone);
-    const when = s.created_at ? new Date(s.created_at) : null;
-    return '<article class="script-card" data-script-id="' + esc(s.id) + '" tabindex="-1">' +
-      '<div class="script-head">' +
-        '<div>' +
-          '<h4>' + esc(s.title) + '</h4>' +
-          '<div class="meta">' + esc(s.account) + (s.duration ? ' · ' + esc(s.duration) : '') +
-            (when ? ' · ' + (when.getMonth()+1) + '月' + when.getDate() + '日' : '') + '</div>' +
-        '</div>' +
-        '<div class="script-state-tags"><span class="tag tag-plain">' + (scheduled ? '当前已排期' : '当前未排期') + '</span><span class="risk risk-' + (r === 'pass' ? 'ok' : r === 'block' ? 'block' : 'warn') + '">' + rLabel + '</span></div>' +
-      '</div>' +
-      '<div class="script-preview">' + esc(String(s.content || '').replace(/[#*|]/g,'').slice(0, 260)) + '</div>' +
-      '<div class="script-foot">' +
-        '<button class="btn btn-ghost btn-sm" data-shoot-script="'+esc(s.id)+'"'+(String(s.content || '').trim()?'':' disabled title="脚本为空"')+'>拍摄模式</button>' +
-        '<button class="btn btn-primary btn-sm" data-makevideo="' + esc(s.id) + '">开始制作</button>' +
-        '<button class="btn btn-primary btn-sm" data-viewscript="' + s.id + '">查看完整脚本</button>' +
-        (live.hits.length
-          ? '<button class="btn btn-fix btn-sm" data-fixscript="' + s.id + '">一键替换禁用词</button>'
-          : '') +
-        (hits !== '无' ? '<span class="hint" style="margin:0">自检：' + esc(hits) + '</span>' : '') +
-        (toneN ? '<span class="hint" style="margin:0">去AI味：' + esc(toneBrief) + '</span>' : '') +
-        '<span style="flex:1"></span>' +
-        '<button class="btn-danger-ghost" data-delscript="' + s.id + '">删除</button>' +
-      '</div>' +
-    '</article>';
+    const day=StudioWorkflow.dayKey(s.created_at);
+    return '<article class="script-card script-library-card" data-script-id="' + esc(s.id) + '" tabindex="-1">' +
+      '<div class="script-head"><div class="script-card-intro">' +
+        '<div class="script-card-meta"><span class="tag tag-account" data-k="'+esc(acc.key)+'">'+esc(s.account)+'</span>'+(s.duration?'<span>'+esc(s.duration)+'</span>':'')+(day?'<time datetime="'+day+'">'+Number(day.slice(5,7))+'月'+Number(day.slice(8))+'日创建</time>':'')+'</div>'+
+        '<h4>'+esc(s.title||'未命名脚本')+'</h4></div>'+
+        '<div class="script-state-tags"><span class="tag tag-plain">' + (scheduled ? '当前已排期' : '当前未排期') + '</span><span class="risk risk-' + (r === 'pass' ? 'ok' : r === 'block' ? 'block' : r === 'empty' ? 'empty' : 'warn') + '">' + rLabel + '</span></div>' +
+      '</div>' + scriptCardPreview(s.content) +
+      '<div class="script-foot">'+
+        '<button class="btn btn-primary btn-sm" data-viewscript="'+esc(s.id)+'">查看完整脚本</button>'+
+        '<button class="btn btn-ghost btn-sm" data-shoot-script="'+esc(s.id)+'"'+(String(s.content||'').trim()?'':' disabled title="脚本为空"')+'>拍摄模式</button>'+
+        '<button class="text-button script-video-link" data-makevideo="'+esc(s.id)+'">开始制作 ↗</button>'+
+      '</div><details class="script-review"><summary>自检与管理<span>'+ (!hasContent?'等待正文':live.hits.length?'自检有 '+live.hits.length+' 处提示':toneN?'有 '+toneN+' 项表达提示':'暂无自检提示')+'</span></summary><div class="script-review-body">'+
+        '<p>自检：'+(hasContent?esc(hits):'暂无正文，尚未检查')+'</p>'+(toneN?'<p>去 AI 味：'+esc(toneBrief)+'</p>':'')+
+        '<div class="script-review-actions">'+(live.hits.length?'<button class="btn btn-fix btn-sm" data-fixscript="'+esc(s.id)+'">一键替换禁用词</button>':'')+
+        '<button class="btn-danger-ghost" data-delscript="'+esc(s.id)+'">删除脚本</button></div></div></details></article>';
   }).join('');
   window.StudioMotion?.settle(box,previous);
 }
@@ -2116,6 +2125,7 @@ async function runAutoSchedule(){
   try{
     await insertSchedules(res.rows);
     await dbLoadSchedules();
+    S.scheduleDay=null;
     renderSchedule(); renderBadges(); renderProgress();
     setSync('已同步', 'is-ok');
     toast('排期完成，共 ' + res.rows.length + ' 条内容', 'ok');
@@ -2129,76 +2139,56 @@ async function runAutoSchedule(){
   }
 }
 
+function scheduleScript(row){
+  return row.script_id!=null ? S.scripts.find(script=>StudioWorkflow.sameId(script.id,row.script_id)) : row.material_id!=null ? scriptForMaterial(row.material_id) : null;
+}
+
+function scheduleCard(row){
+  const shoot=S.scheduleMode==='shoot';
+  const script=scheduleScript(row);
+  const metric=StudioWorkflow.metricForSchedule(row,S.metrics);
+  const publishDay=StudioWorkflow.dayKey(row.publish_at);
+  const shootDay=StudioWorkflow.dayKey(row.shoot_date);
+  const shortDate=day=>day?Number(day.slice(5,7))+'/'+Number(day.slice(8)):'日期待补';
+  const due=publishDay && new Date(row.publish_at).getTime()<=Date.now();
+  const time=shoot ? row.shoot_slot||'时间待定' : publishDay ? new Date(row.publish_at).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hour12:false}) : '时间待定';
+  const state=shoot ? script?'脚本可查看':'待配脚本' : metric?'已录入数据':row.status==='published'?'已标记发布':due?'计划时间已到':'待发布计划';
+  let action=script?'<button class="text-button" data-open-script="'+esc(script.id)+'">查看脚本 ↗</button>':row.material_id!=null && S.materials.some(m=>StudioWorkflow.sameId(m.id,row.material_id))?'<button class="text-button" data-focus-material="'+esc(row.material_id)+'">查看选题 ↗</button>':'<span class="schedule-unavailable">原选题或脚本已不可用</span>';
+  if(shoot && script && String(script.content||'').trim())action+='<button class="btn btn-primary btn-sm" data-shoot-script="'+esc(script.id)+'">拍摄模式</button>';
+  if(!shoot && metric)action+='<button class="text-button" data-open-metric="'+esc(metric.id)+'">查看数据 ↗</button>';
+  else if(!shoot && due)action+='<button class="text-button" data-record-schedule="'+esc(row.id)+'">录入表现 ↗</button>';
+  return '<article class="schedule-task" data-plan-id="'+esc(row.id)+'"><div class="schedule-task-time">'+esc(time)+'</div><span class="schedule-task-state'+(metric&&!shoot?' is-recorded':'')+'">'+state+'</span><h4>'+esc(row.title||'未命名内容')+'</h4><p class="schedule-task-account">'+esc(row.account||'未指定账号')+(row.platform?' · '+esc(row.platform):'')+'</p><p class="schedule-task-related">'+(shoot?'发布 '+shortDate(publishDay):'拍摄 '+shortDate(shootDay))+'</p><div class="schedule-task-actions">'+action+'</div></article>';
+}
+
 function renderSchedule(){
-  const rows = latestPlanRows();
-  const src = $('#scheduleSource');
-  if (!rows.length){
-    $('#scheduleBoard').innerHTML = '';
-    $('#scheduleEmpty').hidden = false;
-    src.textContent = '排期范围：已勾选素材（未勾选时按最新一批素材排）';
-    return;
-  }
-  $('#scheduleEmpty').hidden = true;
-  const withScript = rows.filter(r => r.script_id).length;
-  src.textContent = '当前排期批次：' + rows[0].plan_batch + ' · 共 ' + rows.length + ' 条 · 已配脚本 ' + withScript + ' 条';
-
-  /* 按周分组 */
-  const groups = {};
-  rows.forEach(r => {
-    if (!r.publish_at) return;
-    const d = new Date(r.publish_at);
-    if (isNaN(d.getTime())) return;
-    const mon = ymd(startOfWeek(d));
-    (groups[mon] = groups[mon] || []).push(r);
-  });
-
-  const shootSet = {};
-  rows.forEach(r => { if (r.shoot_date) shootSet[r.shoot_date] = (shootSet[r.shoot_date] || 0) + 1; });
-
-  let html = '';
-  /* 拍摄日速览 */
-  const shootList = Object.keys(shootSet).sort();
-  if (shootList.length){
-    html += '<div class="panel" style="margin-bottom:4px"><div class="panel-head">' +
-      '<div><h2>拍摄日速览</h2><p class="hint">集中拍摄：每个拍摄日把当天要用的素材一次拍完</p></div></div>' +
-      '<div class="kw-wrap" style="margin-top:11px">' +
-      shootList.map(d => '<span class="kw">' + esc(fmtCN(parseYmd(d))) + ' · ' + shootSet[d] + ' 条</span>').join('') +
-      '</div></div>';
-  }
-
-  Object.keys(groups).sort().forEach(mon => {
-    const list = groups[mon];
-    const monday = parseYmd(mon);
-    html += '<div class="schedule-week">' +
-      '<div class="week-title">' + (monday.getMonth()+1) + '月' + monday.getDate() + '日 起 这一周' +
-      '<span>共 ' + list.length + ' 条</span></div>' +
-      '<div class="sched-table">' +
-        '<div class="sched-row head">' +
-          '<div>发布日期</div><div>时间</div><div class="sched-account">账号</div>' +
-          '<div>内容</div><div class="sched-shoot">拍摄日</div><div class="sched-status">脚本</div>' +
-        '</div>' +
-        list.map(r => {
-          const d = r.publish_at ? new Date(r.publish_at) : null;
-          const acc = ACC_BY_NAME[r.account] || { key:'' };
-          const hasSc = !!r.script_id;
-          const dateCell = d
-            ? '<b>' + pad(d.getMonth()+1) + '/' + pad(d.getDate()) + '</b>' + weekdayCN(d)
-            : '<b>—</b>';
-          return '<div class="sched-row">' +
-            '<div class="sched-date">' + dateCell + '</div>' +
-            '<div class="sched-time">' + esc(r.publish_slot || '') + '</div>' +
-            '<div class="sched-account"><span class="tag tag-account" data-k="' + esc(acc.key) + '">' + esc(r.account) + '</span></div>' +
-            '<div class="sched-title">' + esc(r.title) +
-              '<small>' + esc(r.platform) + (hasSc ? ' · 已配脚本' : ' · 待生成脚本') + '</small></div>' +
-            '<div class="sched-shoot">' + (r.shoot_date
-              ? '<span class="slot-pill is-shoot">' + esc(fmtCN(parseYmd(r.shoot_date)).replace(/^.*?日 /,'')) + ' 上午</span>'
-              : '—') + '</div>' +
-            '<div class="sched-status">' + (hasSc ? '<span class="mini-tag">已配</span>' : '<span class="hint" style="margin:0">待配</span>') + '</div>' +
-          '</div>';
-        }).join('') +
-      '</div></div>';
-  });
-  $('#scheduleBoard').innerHTML = html;
+  const rows=latestPlanRows();
+  const today=StudioWorkflow.dayKey();
+  if(!S.scheduleDay && S.loaded)S.scheduleDay=StudioWorkflow.nearestPlanDay(rows,{today,mode:S.scheduleMode,account:S.scheduleAccount});
+  const anchor=S.scheduleDay||today;
+  const days=StudioWorkflow.weekDays(anchor);
+  const accountNames=[...new Set([...rows.map(row=>row.account),S.scheduleAccount==='全部'?'':S.scheduleAccount])].filter(Boolean);
+  const options='<option value="全部">全部账号</option>'+accountNames.map(name=>'<option value="'+esc(name)+'">'+esc(name)+'</option>').join('');
+  if($('#scheduleAccount').innerHTML!==options)$('#scheduleAccount').innerHTML=options;
+  $('#scheduleAccount').value=S.scheduleAccount;
+  $$('#scheduleMode button').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.scheduleMode===S.scheduleMode)));
+  const shoot=S.scheduleMode==='shoot';
+  const {groups,undated}=StudioWorkflow.scheduleWeek(rows,{anchor,mode:S.scheduleMode,account:S.scheduleAccount});
+  const weekRows=groups.flatMap(group=>group.rows);
+  const shortDate=day=>Number(day.slice(5,7))+'月'+Number(day.slice(8))+'日';
+  $('#scheduleModeLabel').textContent=shoot?'SHOOTING WEEK':'PUBLISHING WEEK';
+  $('#scheduleWeekLabel').textContent=days[0].slice(0,4)+'年 '+shortDate(days[0])+' — '+(days[6].slice(0,4)!==days[0].slice(0,4)?days[6].slice(0,4)+'年 ':'')+shortDate(days[6]);
+  $('#scheduleSource').textContent=!S.loaded?(S.loadError?'暂时无法读取排期，请重新读取云端数据。':'正在读取排期…'):rows.length?'当前批次共 '+rows.length+' 条内容 · 按上海时间显示':'生成排期后，内容会按日期出现在这里。';
+  const stats=[[weekRows.length,shoot?'周内拍摄内容':'周内发布内容'],[new Set(weekRows.map(row=>row.account).filter(Boolean)).size,'涉及账号'],[weekRows.filter(row=>!scheduleScript(row)).length,'待配脚本']];
+  $('#scheduleOverview').innerHTML=stats.map(([count,label])=>'<div><strong>'+(S.loaded?count:'—')+'</strong><span>'+label+'</span></div>').join('');
+  $('#scheduleLegend').textContent=shoot?'拍摄安排是计划；进入拍摄模式查看镜头，不代表拍摄已完成。':'到达计划时间不会自动标为已发布；「已录入数据」来自关联的真实记录。';
+  $('#scheduleNoWeek').hidden=!S.loaded||!rows.length||!!weekRows.length;
+  $('#scheduleClear').hidden=S.scheduleAccount==='全部';
+  $('#scheduleNearest').hidden=!rows.some(row=>(S.scheduleAccount==='全部'||row.account===S.scheduleAccount)&&StudioWorkflow.scheduleDay(row,S.scheduleMode));
+  $('#scheduleEmpty').hidden=!S.loaded||!!rows.length;
+  $('#scheduleBoard').dataset.mode=S.scheduleMode;
+  $('#scheduleBoard').innerHTML=groups.filter(group=>!shoot||group.rows.length).map(({day,rows:list})=>'<section class="schedule-day'+(day===today?' is-today':'')+'" aria-label="'+shortDate(day)+' '+WD[days.indexOf(day)]+'"><header><div><span>'+WD[days.indexOf(day)]+'</span><strong>'+Number(day.slice(8))+'</strong></div><small>'+(day===today?'今天':list.length?list.length+' 条':'')+'</small></header><div class="schedule-day-tasks">'+(list.length?list.map(scheduleCard).join(''):'<p class="schedule-day-empty">'+(!S.loaded?'等待读取':shoot?'暂无拍摄':'暂无发布')+'</p>')+'</div></section>').join('');
+  $('#scheduleUndated').hidden=!undated.length;
+  $('#scheduleUndated').innerHTML=undated.length?'<h4>'+undated.length+' 条内容的'+(shoot?'拍摄':'发布')+'日期待补</h4><p class="hint">这些内容仍保留在当前批次，尚不能放入周历。</p><div class="schedule-undated-list">'+undated.map(scheduleCard).join('')+'</div>':'';
 }
 
 /* ---------------------------------------------------------------------
@@ -2221,23 +2211,38 @@ function countRiskScripts(){
 
 /* 本周已发布的视频数据（以「数据看板」录入为准） */
 function metricsThisWeek(){
-  const mon = startOfWeek(new Date());
-  const end = addDays(mon, 7);
-  return S.metrics.filter(m => {
-    if (!m.publish_date) return false;
-    const d = parseYmd(m.publish_date);
-    return d >= mon && d < end;
-  });
+  const days=StudioWorkflow.weekDays(StudioWorkflow.dayKey());
+  return S.metrics.filter(row=>days.includes(StudioWorkflow.dayKey(row.publish_date)));
 }
 
 function planRowsThisWeek(){
-  const mon = startOfWeek(new Date());
-  const end = addDays(mon, 7);
-  return latestPlanRows().filter(r => {
-    if (!r.publish_at) return false;
-    const d = new Date(r.publish_at);
-    return !isNaN(d.getTime()) && d >= mon && d < end;
-  });
+  const days=StudioWorkflow.weekDays(StudioWorkflow.dayKey());
+  return latestPlanRows().filter(row=>days.includes(StudioWorkflow.dayKey(row.publish_at)));
+}
+
+function renderProgressTasks(queues){
+  const types=[['pending','待补脚本','已选选题缺少脚本正文。已有空脚本可查看，未关联脚本的选题可继续处理。'],['dates','待补日期','当前批次未标记发布、未关联数据的计划中，拍摄或发布日期缺失。可查看对应排期。'],['review','待核对发布','已标记发布或计划时间已到，尚未关联数据。先确认实际发布情况，再录入表现。']];
+  $('#progressQueues').innerHTML=types.map(([key,label],index)=>'<button type="button" class="progress-queue'+(key===S.progressQueue?' is-active':'')+'" data-progress-queue="'+key+'" aria-pressed="'+(key===S.progressQueue)+'"><span class="progress-queue-index">0'+(index+1)+'</span><span>'+label+'</span><strong>'+queues[key].length+'</strong><span aria-hidden="true">↗</span></button>').join('');
+  $('#progressQueueHint').textContent=types.find(([key])=>key===S.progressQueue)[2];
+  const rows=queues[S.progressQueue];
+  $('#progressTasks').innerHTML=rows.length?rows.slice(0,S.progressLimit).map(item=>{
+    const pending=S.progressQueue==='pending';
+    const row=pending?item.material:item;
+    let detail='',action='';
+    if(pending){
+      detail=item.script?'已有脚本，正文待补':'已选中，尚未关联脚本';
+      action=item.script?'<button class="btn btn-ghost btn-sm" data-open-script="'+esc(item.script.id)+'">查看脚本</button>':'<button class="btn btn-ghost btn-sm" data-focus-material="'+esc(row.id)+'">处理选题</button>';
+    }else if(S.progressQueue==='dates'){
+      detail=[!StudioWorkflow.dayKey(row.shoot_date)?'拍摄日期待补':'',!StudioWorkflow.dayKey(row.publish_at)?'发布日期待补':''].filter(Boolean).join(' · ');
+      action='<button class="btn btn-ghost btn-sm" data-progress-plan="'+esc(row.id)+'">查看排期</button>';
+    }else{
+      detail=(row.status==='published'?'已标记发布':'计划时间已到')+' · 尚未录入数据';
+      action='<button class="btn btn-ghost btn-sm" data-progress-plan="'+esc(row.id)+'">核对排期</button><button class="text-button" data-record-schedule="'+esc(row.id)+'">录入表现 ↗</button>';
+    }
+    return '<article class="progress-task" data-progress-item="'+esc(row.id)+'"><div><small>'+esc(row.account||'未指定账号')+'</small><h4>'+esc(row.title||'未命名内容')+'</h4><p>'+detail+'</p></div><div class="progress-task-actions">'+action+'</div></article>';
+  }).join(''):'<div class="progress-task-empty"><span aria-hidden="true">✓</span><strong>这一类暂时没有待办</strong><p>可切换其他类别，或查看下方的创作阶段与拍摄安排。</p></div>';
+  $('#progressTaskCount').textContent='显示 '+Math.min(rows.length,S.progressLimit)+' / '+rows.length+' 条';
+  $('#progressMore').hidden=rows.length<=S.progressLimit;
 }
 
 function kpiCard(label, value, sub, cls){
@@ -2259,7 +2264,9 @@ function renderProgress(){
   const planN = planRows.length;
   const pubN = S.metrics.length;
   const risk = countRiskScripts();
-  const noScript = planRows.filter(r => !r.script_id).length;
+  const noScript = planRows.filter(r => !String(scheduleScript(r)?.content||'').trim()).length;
+  const queues=StudioWorkflow.progressQueues(S.materials,S.scripts,planRows,S.metrics);
+  renderProgressTasks(queues);
 
   $('#progressMeta').textContent = '数据来自素材库 / 脚本库 / 排期表 / 数据看板 · 最近更新 ' +
     pad(new Date().getHours()) + ':' + pad(new Date().getMinutes()) +
@@ -2268,36 +2275,24 @@ function renderProgress(){
   /* ---- KPI ---- */
   $('#progressKpis').innerHTML = [
     kpiCard('候选素材', batchN, '最新一批 · 素材库共 ' + S.materials.length + ' 条', 'is-brand'),
-    kpiCard('待制作', selectedN, selectedN ? '已勾选，待出脚本' : '还没有勾选素材',
-      selectedN ? '' : ''),
+    kpiCard('待补脚本', queues.pending.length, '已勾选 '+selectedN+' 条 · 缺少正文的选题'),
     kpiCard('已出脚本', scriptN, '其中 ' + withScriptN + ' 条素材已配脚本'),
     kpiCard('已排期', planN, planN ? '批次 ' + (planRows[0].plan_batch || '') : '还没生成排期'),
-    kpiCard('已发布', pubN, pubN ? '以数据看板录入为准' : '还没录入视频数据',
+    kpiCard('已录入数据', pubN, pubN ? '手动录入的作品表现' : '还没录入视频数据',
       pubN ? 'is-ok' : ''),
     kpiCard('命中禁用词', risk.block, risk.block ? '发布前必须改写' : '无（已清零）',
       risk.block ? 'is-bad' : 'is-ok')
   ].join('');
 
-  /* ---- 生产漏斗 ---- */
-  const steps = [
-    { name:'候选素材', n:batchN },
-    { name:'加入待制作', n:selectedN },
-    { name:'已出脚本', n:scriptN },
-    { name:'已排期', n:planN },
-    { name:'已发布', n:pubN }
+  /* 各阶段来自不同范围，不将它们相除为转化率。 */
+  const steps=[
+    {name:'候选素材',n:batchN,scope:'最新一批',route:'materials'},
+    {name:'已选选题',n:selectedN,scope:'全部已勾选',route:'materials'},
+    {name:'脚本库',n:scriptN,scope:'全部脚本',route:'scripts'},
+    {name:'已排期',n:planN,scope:'当前排期批次',route:'schedule'},
+    {name:'已录入数据',n:pubN,scope:'全部作品记录',route:'data'}
   ];
-  const base = Math.max(1, steps[0].n);
-  $('#progressFunnel').innerHTML = steps.map((s, i) => {
-    const w = Math.max(2, Math.round(s.n / base * 100));
-    const pctOfPrev = i === 0 ? '' : (steps[i-1].n ? Math.round(s.n / steps[i-1].n * 100) + '%' : '—');
-    return '<div class="fn-row is-step' + (i+1) + '">' +
-      '<div class="fn-name">' + esc(s.name) + '</div>' +
-      '<div class="fn-bar"><div class="fn-fill" style="width:' + w + '%"></div></div>' +
-      '<div class="fn-num"><b>' + s.n + '</b>' + (pctOfPrev ? '<em>' + pctOfPrev + '</em>' : '') + '</div>' +
-      '</div>';
-  }).join('') +
-  '<p class="hint" style="margin-top:4px">每行右侧小字＝该环节相对上一环节的留存比例。' +
-  '「已发布」需要你在「数据看板」里录入后才会动。</p>';
+  $('#progressFunnel').innerHTML=steps.map((step,index)=>'<button class="progress-stage" data-route="'+step.route+'"><span class="progress-stage-index">0'+(index+1)+'</span><span>'+step.name+'</span><strong>'+step.n+'</strong><small>'+step.scope+'</small><span class="progress-stage-arrow" aria-hidden="true">↗</span></button>').join('')+'<p class="hint">各阶段统计范围不同，不作为同一批内容的转化率。</p>';
 
   /* ---- 账号节奏达成率 ---- */
   const weekPub = metricsThisWeek();
@@ -2320,39 +2315,38 @@ function renderProgress(){
 
   /* ---- 拍摄日负载 ---- */
   const shootMap = {};
-  planRows.forEach(r => { if (r.shoot_date) shootMap[r.shoot_date] = (shootMap[r.shoot_date] || 0) + 1; });
+  planRows.forEach(r => { const day=StudioWorkflow.dayKey(r.shoot_date);if(day)shootMap[day]=(shootMap[day]||0)+1; });
   const shoots = Object.keys(shootMap).sort();
-  const today = new Date(); today.setHours(0,0,0,0);
-  const nextShoot = shoots.find(d => parseYmd(d) >= today);
+  const today=StudioWorkflow.dayKey();
+  const nextShoot=shoots.find(day=>day>=today);
   $('#progressShoot').innerHTML = shoots.length
     ? shoots.map(d => {
         const dt = parseYmd(d);
         return '<div class="shoot-pill' + (d === nextShoot ? ' is-next' : '') + '">' +
           '<div class="sp-date">' + (dt.getMonth()+1) + '/' + dt.getDate() + ' ' + weekdayCN(dt) +
             (d === nextShoot ? ' · 下一场' : '') + '</div>' +
-          '<div class="sp-count">' + shootMap[d] + ' 条要拍 · 上午</div>' +
+          '<div class="sp-count">' + shootMap[d] + ' 条拍摄计划</div>' +
           '</div>';
       }).join('')
-    : '<p class="hint" style="margin:0">还没有排期。生成排期后这里会显示每个拍摄日要拍多少条。</p>';
+    : '<p class="hint" style="margin:0">'+(planRows.length?'当前批次尚未填写有效的拍摄日期。':'还没有排期。生成排期后这里会显示每个拍摄日的计划数量。')+'</p>';
 
   /* ---- 未来 7 天发布计划 ---- */
-  const now = new Date();
-  const limit = addDays(now, 7);
-  const upcoming = planRows.filter(r => {
-    if (!r.publish_at) return false;
-    const d = new Date(r.publish_at);
-    return !isNaN(d.getTime()) && d >= now && d <= limit;
-  }).slice(0, 12);
+  const endDay=StudioWorkflow.shiftDay(today,6);
+  const upcoming=planRows.filter(row=>{
+    const day=StudioWorkflow.dayKey(row.publish_at);return day&&day>=today&&day<=endDay;
+  }).slice().sort((a,b)=>new Date(a.publish_at)-new Date(b.publish_at)).slice(0,12);
   $('#progressUpcoming').innerHTML = upcoming.length
     ? upcoming.map(r => {
-        const d = new Date(r.publish_at);
+        const day=StudioWorkflow.dayKey(r.publish_at);
+        const d=parseYmd(day);
+        const script=scheduleScript(r);
         return '<div class="up-row">' +
           '<div class="up-date"><b>' + pad(d.getMonth()+1) + '/' + pad(d.getDate()) + '</b>' + weekdayCN(d) + '</div>' +
           '<div class="up-time">' + esc(r.publish_slot || '') + '</div>' +
           '<div class="up-title">' + esc(r.title) + '</div>' +
-          '<div>' + (r.script_id
-            ? '<span class="pill pill-ok">已配脚本</span>'
-            : '<span class="pill pill-warn">待配脚本</span>') + '</div>' +
+          '<div>' + (script&&String(script.content||'').trim()
+            ? '<button class="text-button" data-open-script="'+esc(script.id)+'">查看脚本 ↗</button>'
+            : '<span class="pill pill-warn">脚本待补</span>') + '</div>' +
           '</div>';
       }).join('')
     : '<p class="hint" style="margin:0">未来 7 天没有排期。先勾选素材并生成排期。</p>';
@@ -2374,7 +2368,7 @@ function renderProgress(){
     ? { cls:'is-warn', t:'有风险提示的脚本 ' + risk.warn + ' 支', d:'属于「提示级」（如出现"电话/保证"等表述），建议确认后再发。' }
     : { cls:'is-ok', t:'风险表述：0 支', d:'没有需要人工确认的提示级表述。' });
   notes.push(noScript
-    ? { cls:'is-warn', t:'已排期但未配脚本 ' + noScript + ' 条', d:'这些内容到了拍摄日会没东西可拍，建议先补脚本。' }
+    ? { cls:'is-warn', t:'排期脚本缺失或正文为空 ' + noScript + ' 条', d:'这些内容到了拍摄日会没东西可拍，建议先补脚本。' }
     : { cls:'is-ok', t:'排期脚本齐备', d:'当前批次的排期条目都已配脚本。' });
   notes.push(unsigned
     ? { cls:'is-warn', t:'未署名改动 ' + unsigned + ' 条', d:'素材/脚本里有记录没写操作人，出问题时不好追溯。建议在右上角填「当前操作人」。' }
@@ -2422,8 +2416,7 @@ function sum(list, pick){
 }
 
 function visibleMetrics(){
-  if (S.dataFilter === '全部') return S.metrics;
-  return S.metrics.filter(m => m.account === S.dataFilter);
+  return StudioWorkflow.filterMetrics(S.metrics,{account:S.dataFilter,query:S.dataQuery,period:S.dataPeriod});
 }
 
 function renderData(){
@@ -2431,10 +2424,17 @@ function renderData(){
   if (!$('#dataKpis')) return;
   const list = visibleMetrics();
 
-  $('#dataMeta').textContent = S.metrics.length
-    ? '共 ' + S.metrics.length + ' 条记录 · 手动录入 · 最后更新 ' +
-      new Date().toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' })
-    : '还没有数据。点右上角「录入一条数据」，把平台后台的数字抄进来。';
+  fillDataFilter();
+  const filtered=S.dataFilter!=='全部'||!!S.dataQuery.trim()||S.dataPeriod!=='all';
+  $('#dataClear').hidden=!filtered;
+  $$('[data-data-period]').forEach(button=>{
+    const active=button.dataset.dataPeriod===S.dataPeriod;
+    button.classList.toggle('is-active',active);button.setAttribute('aria-pressed',String(active));
+  });
+  const today=StudioWorkflow.dayKey();
+  const period=S.dataPeriod==='all'?'全部时间':S.dataPeriod==='undated'?'未填或无效发布日期':StudioWorkflow.shiftDay(today,S.dataPeriod==='7'?-6:-29)+' — '+today+'（含今天 · 上海时间）';
+  $('#dataScope').textContent=period+' · '+S.dataFilter+' · 显示 '+list.length+' / '+S.metrics.length+' 条；指标、图表与回溯同步筛选。';
+  $('#dataMeta').textContent='手动录入平台后台数据；修改筛选只影响查看范围。';
 
   const totalViews = sum(list, m => m.views);
   const avgF3 = avg(list, m => m.finish_3s);
@@ -2445,7 +2445,7 @@ function renderData(){
   renderDataVisuals(list, avgF3);
 
   $('#dataKpis').innerHTML = [
-    kpiCard('已录入视频', list.length, '当前账号范围 · 共 ' + S.metrics.length + ' 条', 'is-brand'),
+    kpiCard('已录入视频', list.length, '当前筛选范围 · 共 ' + S.metrics.length + ' 条', 'is-brand'),
     kpiCard('总播放量', nfNum(totalViews), list.length ? list.length + ' 条合计' : '暂无数据'),
     kpiCard('平均 3 秒完播', avgF3 == null ? '—' : nfPct(avgF3), '参考线 ≥ ' + THRESH.f3 + '%',
       avgF3 == null ? '' : (avgF3 >= THRESH.f3 ? 'is-ok' : 'is-warn')),
@@ -2459,7 +2459,8 @@ function renderData(){
   /* 明细表 */
   if (!list.length){
     $('#dataTable').innerHTML = '<p class="hint" style="margin:0">' +
-      (S.metrics.length ? '当前筛选条件下没有数据。' : '还没有录入数据。') + '</p>';
+      (S.metrics.length ? '当前筛选条件下没有数据。' : '还没有录入数据。') + '</p>'+
+      (filtered?'<button class="btn btn-ghost btn-sm" data-clear-data-filters>清除筛选</button>':'');
   } else {
     $('#dataTable').innerHTML =
       '<table class="dtable"><thead><tr>' +
@@ -2469,12 +2470,12 @@ function renderData(){
         '<th class="num">商品点击</th><th class="num">核销</th><th class="num">涨粉</th>' +
         '<th></th>' +
       '</tr></thead><tbody>' +
-      list.map(m => {
-        const d = m.publish_date ? parseYmd(m.publish_date) : null;
+      StudioWorkflow.sortMetrics(list,S.dataSort).map(m => {
+        const day = StudioWorkflow.dayKey(m.publish_date);
         const cr = clickRate(m);
         const acc = ACC_BY_NAME[m.account] || { key:'' };
-        return '<tr>' +
-          '<td>' + (d ? (d.getMonth()+1) + '/' + d.getDate() : '—') + '</td>' +
+        return '<tr data-metric-id="'+esc(m.id)+'">' +
+          '<td>' + (day || '未填日期') + '</td>' +
           '<td class="dt-title">' + esc(m.title || '') +
             '<small><span class="tag tag-account" data-k="' + esc(acc.key) + '">' + esc(m.account) + '</span> ' +
             esc(m.platform || '') +
@@ -2491,8 +2492,8 @@ function renderData(){
           '<td class="num">' + nfNum(m.groupon_redeemed) + '</td>' +
           '<td class="num">' + nfNum(m.followers_gain) + '</td>' +
           '<td class="cell-actions">' +
-            '<button class="btn btn-ghost btn-sm" data-editmetric="' + m.id + '">编辑</button>' +
-            '<button class="btn-danger-ghost" data-delmetric="' + m.id + '">删除</button>' +
+            '<button class="btn btn-ghost btn-sm" data-editmetric="' + esc(m.id) + '">编辑</button>' +
+            '<button class="btn-danger-ghost" data-delmetric="' + esc(m.id) + '">删除</button>' +
           '</td>' +
         '</tr>';
       }).join('') +
@@ -2507,14 +2508,18 @@ function renderData(){
     return (Number(b.views)||0) - (Number(a.views)||0);
   }).slice(0, 8);
   $('#dataRank').innerHTML = ranked.length
-    ? ranked.map((m, i) =>
-        '<div class="rank-row' + (i === 0 ? ' is-top' : '') + '">' +
+    ? ranked.map((m, i) => {
+        const source=StudioWorkflow.metricSource(m,S.schedules,S.scripts,S.materials);
+        return '<div class="rank-row' + (i === 0 ? ' is-top' : '') + '">' +
         '<div class="rank-no">' + (i+1) + '</div>' +
         '<div class="rank-title">' + esc(m.title || '') +
           '<small>' + esc(m.account) + ' · 播放 ' + nfNum(m.views) +
-          (m.groupon_redeemed ? ' · 核销 ' + nfNum(m.groupon_redeemed) : '') + '</small></div>' +
+          (m.groupon_redeemed ? ' · 核销 ' + nfNum(m.groupon_redeemed) : '') + '</small><div class="rank-source-links">'+
+          (source.material?'<button class="text-button" data-focus-material="'+esc(source.material.id)+'">回看选题 ↗</button>':'')+
+          (source.script?'<button class="text-button" data-open-script="'+esc(source.script.id)+'">查看脚本 ↗</button>':'')+
+          (!source.material&&!source.script?'<span>暂无可回溯的选题或脚本</span>':'')+'</div></div>' +
         '<div class="rank-score"><b>' + (m.finish_3s == null ? '—' : nfPct(m.finish_3s)) + '</b><br>3 秒完播</div>' +
-        '</div>').join('')
+        '</div>';}).join('')
     : '<p class="hint" style="margin:0">录入数据后，这里会按 3 秒完播率排出表现最好的选题，' +
       '下一轮「刷新风口」就可以照着加码同类素材。</p>';
 }
@@ -2540,12 +2545,13 @@ function fillMetricControls(){
     }).join('');
 }
 
-/* 账号筛选下拉（只在启动时建一次，避免录入时把筛选状态重置掉） */
+/* 包含历史账号；刷新选项时保留当前筛选。 */
 function fillDataFilter(){
   const sel = $('#dataFilter');
   if (!sel) return;
-  sel.innerHTML = '<option value="全部">全部账号</option>' + ACCOUNTS.map(a =>
-    '<option value="' + esc(a.name) + '">' + esc(a.name) + '</option>').join('');
+  const names=[...new Set([...ACCOUNTS.map(a=>a.name),...S.metrics.map(m=>m.account),S.dataFilter])].filter(name=>name&&name!=='全部');
+  const options='<option value="全部">全部账号</option>'+names.map(name=>'<option value="'+esc(name)+'">'+esc(name)+'</option>').join('');
+  if(sel.innerHTML!==options)sel.innerHTML=options;
   sel.value = S.dataFilter;
 }
 
@@ -2894,7 +2900,7 @@ function openMaterialWorkspace(id){
     S.pendingOnly=false;$('#pendingOnly').checked=false;renderPending();
     switchView('scripts');focusWorkspaceItem('data-pending-id',material.id);
   }else{
-    S.search='';S.filter='全部';S.onlyLatest=false;S.selectedOnly=false;
+    S.search='';S.filter='全部';S.onlyLatest=false;S.selectedOnly=false;S.materialForm='全部';S.materialStatus='all';
     $('#materialSearch').value='';$('#onlyLatest').checked=false;
     renderFilter();renderMaterials();switchView('materials');focusWorkspaceItem('data-material-id',material.id);
   }
@@ -2914,6 +2920,12 @@ function applyScheduleToMetric(row){
 function bindStudioWorkflow(){
   $('#scriptSearch').addEventListener('input',event=>{S.scriptQuery=event.target.value;renderScripts();});
   $('#scriptAccount').addEventListener('change',event=>{S.scriptAccount=event.target.value;renderScripts();});
+  $('#scriptSort').addEventListener('change',event=>{S.scriptSort=event.target.value;renderScripts();});
+  $('#view-scripts').addEventListener('click',event=>{
+    if(!event.target.closest('#scriptClear, [data-clear-script-filters]'))return;
+    S.scriptQuery='';S.scriptAccount='全部';S.scriptStatus='all';
+    $('#scriptSearch').value='';renderScripts();$('#scriptSearch').focus();
+  });
   $('#scriptStatusFilter').addEventListener('click',event=>{
     const button=event.target.closest('[data-script-status]');if(!button)return;
     S.scriptStatus=button.dataset.scriptStatus;renderScripts();
@@ -2968,8 +2980,9 @@ function bindStudioWorkflow(){
 function renderDataVisuals(list, average){
   const byDay = new Map();
   list.forEach(m => {
-    if(!/^\d{4}-\d{2}-\d{2}$/.test(m.publish_date || '')) return;
-    byDay.set(m.publish_date, (byDay.get(m.publish_date) || 0) + Math.max(0,Number(m.views)||0));
+    const day=StudioWorkflow.dayKey(m.publish_date);
+    if(!day)return;
+    byDay.set(day, (byDay.get(day) || 0) + Math.max(0,Number(m.views)||0));
   });
   const days = [...byDay.entries()].sort(([a],[b])=>a.localeCompare(b)).slice(-7);
   const max = Math.max(1,...days.map(([,v])=>v));
@@ -2988,6 +3001,8 @@ function switchView(v){
     else el.removeAttribute('aria-current');
   });
   if (v === 'home') renderHome();
+  if (v === 'schedule') renderSchedule();
+  if (v === 'progress') renderProgress();
   $$('.view').forEach(el => el.classList.toggle('is-active', el.id === 'view-' + v));
   $$('.tab').forEach(el => el.classList.toggle('is-active', el.dataset.view === v));
   /* 数据管理页显示的是实时条数，切过去时刷新一次 */
@@ -3004,6 +3019,13 @@ function bind(){
     if(route){ switchView(route.dataset.route); $('#views').focus({preventScroll:true}); }
   });
   $('#materialSearch').addEventListener('input', e => { S.search = e.target.value; renderMaterials(); });
+  $('#materialForm').addEventListener('change',event=>{S.materialForm=event.target.value;renderMaterials();});
+  $('#materialStatus').addEventListener('change',event=>{S.materialStatus=event.target.value;renderMaterials();});
+  $('#view-materials').addEventListener('click',event=>{
+    if(!event.target.closest('#materialClear, [data-clear-material-filters]'))return;
+    S.search='';S.filter='全部';S.selectedOnly=false;S.materialForm='全部';S.materialStatus='all';
+    $('#materialSearch').value='';renderFilter();renderMaterials();$('#materialSearch').focus();
+  });
   bindStudioWorkflow();
 
   $('#tabs').addEventListener('click', e => {
@@ -3113,6 +3135,38 @@ function bind(){
     S.dataFilter = e.target.value;
     renderData();
   });
+  $('#progressQueues').addEventListener('click',event=>{
+    const button=event.target.closest('[data-progress-queue]');if(!button)return;
+    S.progressQueue=button.dataset.progressQueue;S.progressLimit=6;
+    renderProgressTasks(StudioWorkflow.progressQueues(S.materials,S.scripts,latestPlanRows(),S.metrics));
+    $$('#progressQueues button').find(el=>el.dataset.progressQueue===S.progressQueue)?.focus({preventScroll:true});
+    window.StudioMotion?.region($('#progressTasks'));
+  });
+  $('#progressMore').addEventListener('click',()=>{
+    S.progressLimit+=6;
+    renderProgressTasks(StudioWorkflow.progressQueues(S.materials,S.scripts,latestPlanRows(),S.metrics));
+    if($('#progressMore').hidden){$('#progressTaskCount').tabIndex=-1;$('#progressTaskCount').focus({preventScroll:true});}
+  });
+  $('#progressTasks').addEventListener('click',event=>{
+    const button=event.target.closest('[data-progress-plan]');if(!button)return;
+    const row=latestPlanRows().find(row=>StudioWorkflow.sameId(row.id,button.dataset.progressPlan));if(!row)return;
+    S.scheduleAccount='全部';
+    S.scheduleMode=S.progressQueue==='dates'&&!StudioWorkflow.dayKey(row.shoot_date)?'shoot':'publish';
+    S.scheduleDay=StudioWorkflow.scheduleDay(row,S.scheduleMode)||StudioWorkflow.dayKey();
+    renderSchedule();switchView('schedule');
+    $$('#view-schedule [data-plan-id]').forEach(el=>el.tabIndex=-1);
+    focusWorkspaceItem('data-plan-id',row.id);
+  });
+  $('#dataSearch').addEventListener('input',event=>{S.dataQuery=event.target.value;renderData();});
+  $('#dataSort').addEventListener('change',event=>{S.dataSort=event.target.value;renderData();});
+  $('#view-data').addEventListener('click',event=>{
+    const period=event.target.closest('[data-data-period]');
+    if(period){S.dataPeriod=period.dataset.dataPeriod;renderData();return;}
+    if(event.target.closest('#dataClear, [data-clear-data-filters]')){
+      S.dataFilter='全部';S.dataQuery='';S.dataPeriod='all';
+      $('#dataSearch').value='';renderData();$('#dataSearch').focus();
+    }
+  });
   $('#mSchedule').addEventListener('change', e => {
     const r = latestPlanRows().find(x => String(x.id) === e.target.value);
     if (!r) return;
@@ -3120,9 +3174,9 @@ function bind(){
   });
   $('#dataTable').addEventListener('click', e => {
     const ed = e.target.closest('[data-editmetric]');
-    if (ed){ openMetricForm(Number(ed.dataset.editmetric)); return; }
+    if (ed){ const metric=S.metrics.find(row=>StudioWorkflow.sameId(row.id,ed.dataset.editmetric));if(metric){openMetricForm(metric.id);$('#mTitle').focus();}return; }
     const dl = e.target.closest('[data-delmetric]');
-    if (dl) delMetric(Number(dl.dataset.delmetric));
+    if (dl){const metric=S.metrics.find(row=>StudioWorkflow.sameId(row.id,dl.dataset.delmetric));if(metric)delMetric(metric.id);}
   });
 
   $('#accountFilter').addEventListener('click', e => {
@@ -3173,6 +3227,26 @@ function bind(){
   });
 
   $('#btnAutoSchedule').addEventListener('click', runAutoSchedule);
+  const moveSchedule=day=>{
+    const old=S.scheduleDay||StudioWorkflow.dayKey();
+    if(StudioWorkflow.weekDays(old)[0]===StudioWorkflow.weekDays(day)[0])return;
+    S.scheduleDay=day;renderSchedule();
+    window.StudioMotion?.region($('#scheduleBoard'),day>old?1:-1);
+  };
+  $('#schedulePrev').addEventListener('click',()=>moveSchedule(StudioWorkflow.shiftDay(S.scheduleDay||StudioWorkflow.dayKey(),-7)));
+  $('#scheduleNext').addEventListener('click',()=>moveSchedule(StudioWorkflow.shiftDay(S.scheduleDay||StudioWorkflow.dayKey(),7)));
+  $('#scheduleToday').addEventListener('click',()=>moveSchedule(StudioWorkflow.dayKey()));
+  $('#scheduleNearest').addEventListener('click',()=>{
+    moveSchedule(StudioWorkflow.nearestPlanDay(latestPlanRows(),{mode:S.scheduleMode,account:S.scheduleAccount}));
+    $('#scheduleWeekLabel').setAttribute('tabindex','-1');$('#scheduleWeekLabel').focus({preventScroll:true});
+  });
+  $('#scheduleClear').addEventListener('click',()=>{S.scheduleAccount='全部';renderSchedule();$('#scheduleAccount').focus();});
+  $('#scheduleAccount').addEventListener('change',event=>{S.scheduleAccount=event.target.value;renderSchedule();window.StudioMotion?.region($('#scheduleBoard'));});
+  $('#scheduleMode').addEventListener('click',event=>{
+    const button=event.target.closest('[data-schedule-mode]');
+    if(!button||button.dataset.scheduleMode===S.scheduleMode)return;
+    S.scheduleMode=button.dataset.scheduleMode;renderSchedule();window.StudioMotion?.region($('#scheduleBoard'));
+  });
 
   $('#modal').addEventListener('click', e => {
     if (e.target.closest('[data-close]')) closeScript();
@@ -3542,7 +3616,7 @@ async function boot(){
   }catch(e){
     console.error(e);
     S.loadError = true;
-    renderHome();
+    renderHome(); renderSchedule();
     setSync('连接失败', 'is-err');
     toast('无法连接云服务：' + (e.message || e), 'err');
   }
