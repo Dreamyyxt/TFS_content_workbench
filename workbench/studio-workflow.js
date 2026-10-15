@@ -44,5 +44,20 @@
       (!term || [script.title,script.account,script.content].join(' ').toLocaleLowerCase().includes(term)) &&
       (status==='all' || status==='scheduled' && scheduled || status==='unplanned' && !scheduled || status==='review' && scan.hits.length>0));
   }
-  return {sameId,dayKey,shiftDay,weekDays,rowsOnDay,metricForSchedule,isScriptScheduled,filterScripts};
+  const scheduleDay=(row,mode='publish')=>dayKey(mode==='shoot'?row.shoot_date:row.publish_at);
+  function nearestPlanDay(rows,{mode='publish',account='全部',today=dayKey()}={}){
+    const dates=rows.filter(r=>account==='全部'||r.account===account).map(r=>scheduleDay(r,mode)).filter(Boolean).sort();
+    if(dates.some(day=>weekDays(today).includes(day)))return today;
+    return dates.find(day=>day>=today)||dates.at(-1)||today;
+  }
+  function scheduleWeek(rows,{anchor=dayKey(),mode='publish',account='全部'}={}){
+    const days=weekDays(anchor);
+    const filtered=rows.filter(r=>account==='全部'||r.account===account);
+    const groups=days.map(day=>({day,rows:filtered.filter(r=>scheduleDay(r,mode)===day).slice().sort((a,b)=>{
+      const aTime=new Date(a.publish_at).getTime(), bTime=new Date(b.publish_at).getTime();
+      return (Number.isFinite(aTime)?aTime:Infinity)-(Number.isFinite(bTime)?bTime:Infinity)||String(a.title||'').localeCompare(String(b.title||''));
+    })}));
+    return {groups,undated:filtered.filter(r=>!scheduleDay(r,mode))};
+  }
+  return {scheduleDay,nearestPlanDay,scheduleWeek,sameId,dayKey,shiftDay,weekDays,rowsOnDay,metricForSchedule,isScriptScheduled,filterScripts};
 });

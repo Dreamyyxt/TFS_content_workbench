@@ -506,6 +506,9 @@ const S = {
   scriptStatus: 'all',
   pendingOnly: false,
   homeDay: StudioWorkflow.dayKey(),
+  scheduleDay: null,
+  scheduleMode: 'publish',
+  scheduleAccount: '全部',
   scripts: [],
   schedules: [],
   metrics: [],
@@ -2116,6 +2119,7 @@ async function runAutoSchedule(){
   try{
     await insertSchedules(res.rows);
     await dbLoadSchedules();
+    S.scheduleDay=null;
     renderSchedule(); renderBadges(); renderProgress();
     setSync('已同步', 'is-ok');
     toast('排期完成，共 ' + res.rows.length + ' 条内容', 'ok');
@@ -2129,76 +2133,56 @@ async function runAutoSchedule(){
   }
 }
 
+function scheduleScript(row){
+  return row.script_id!=null ? S.scripts.find(script=>StudioWorkflow.sameId(script.id,row.script_id)) : row.material_id!=null ? scriptForMaterial(row.material_id) : null;
+}
+
+function scheduleCard(row){
+  const shoot=S.scheduleMode==='shoot';
+  const script=scheduleScript(row);
+  const metric=StudioWorkflow.metricForSchedule(row,S.metrics);
+  const publishDay=StudioWorkflow.dayKey(row.publish_at);
+  const shootDay=StudioWorkflow.dayKey(row.shoot_date);
+  const shortDate=day=>day?Number(day.slice(5,7))+'/'+Number(day.slice(8)):'日期待补';
+  const due=publishDay && new Date(row.publish_at).getTime()<=Date.now();
+  const time=shoot ? row.shoot_slot||'时间待定' : publishDay ? new Date(row.publish_at).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit',hour12:false}) : '时间待定';
+  const state=shoot ? script?'脚本可查看':'待配脚本' : metric?'已录入数据':row.status==='published'?'已标记发布':due?'计划时间已到':'待发布计划';
+  let action=script?'<button class="text-button" data-open-script="'+esc(script.id)+'">查看脚本 ↗</button>':row.material_id!=null && S.materials.some(m=>StudioWorkflow.sameId(m.id,row.material_id))?'<button class="text-button" data-focus-material="'+esc(row.material_id)+'">查看选题 ↗</button>':'<span class="schedule-unavailable">原选题或脚本已不可用</span>';
+  if(shoot && script && String(script.content||'').trim())action+='<button class="btn btn-primary btn-sm" data-shoot-script="'+esc(script.id)+'">拍摄模式</button>';
+  if(!shoot && metric)action+='<button class="text-button" data-open-metric="'+esc(metric.id)+'">查看数据 ↗</button>';
+  else if(!shoot && due)action+='<button class="text-button" data-record-schedule="'+esc(row.id)+'">录入表现 ↗</button>';
+  return '<article class="schedule-task" data-plan-id="'+esc(row.id)+'"><div class="schedule-task-time">'+esc(time)+'</div><span class="schedule-task-state'+(metric&&!shoot?' is-recorded':'')+'">'+state+'</span><h4>'+esc(row.title||'未命名内容')+'</h4><p class="schedule-task-account">'+esc(row.account||'未指定账号')+(row.platform?' · '+esc(row.platform):'')+'</p><p class="schedule-task-related">'+(shoot?'发布 '+shortDate(publishDay):'拍摄 '+shortDate(shootDay))+'</p><div class="schedule-task-actions">'+action+'</div></article>';
+}
+
 function renderSchedule(){
-  const rows = latestPlanRows();
-  const src = $('#scheduleSource');
-  if (!rows.length){
-    $('#scheduleBoard').innerHTML = '';
-    $('#scheduleEmpty').hidden = false;
-    src.textContent = '排期范围：已勾选素材（未勾选时按最新一批素材排）';
-    return;
-  }
-  $('#scheduleEmpty').hidden = true;
-  const withScript = rows.filter(r => r.script_id).length;
-  src.textContent = '当前排期批次：' + rows[0].plan_batch + ' · 共 ' + rows.length + ' 条 · 已配脚本 ' + withScript + ' 条';
-
-  /* 按周分组 */
-  const groups = {};
-  rows.forEach(r => {
-    if (!r.publish_at) return;
-    const d = new Date(r.publish_at);
-    if (isNaN(d.getTime())) return;
-    const mon = ymd(startOfWeek(d));
-    (groups[mon] = groups[mon] || []).push(r);
-  });
-
-  const shootSet = {};
-  rows.forEach(r => { if (r.shoot_date) shootSet[r.shoot_date] = (shootSet[r.shoot_date] || 0) + 1; });
-
-  let html = '';
-  /* 拍摄日速览 */
-  const shootList = Object.keys(shootSet).sort();
-  if (shootList.length){
-    html += '<div class="panel" style="margin-bottom:4px"><div class="panel-head">' +
-      '<div><h2>拍摄日速览</h2><p class="hint">集中拍摄：每个拍摄日把当天要用的素材一次拍完</p></div></div>' +
-      '<div class="kw-wrap" style="margin-top:11px">' +
-      shootList.map(d => '<span class="kw">' + esc(fmtCN(parseYmd(d))) + ' · ' + shootSet[d] + ' 条</span>').join('') +
-      '</div></div>';
-  }
-
-  Object.keys(groups).sort().forEach(mon => {
-    const list = groups[mon];
-    const monday = parseYmd(mon);
-    html += '<div class="schedule-week">' +
-      '<div class="week-title">' + (monday.getMonth()+1) + '月' + monday.getDate() + '日 起 这一周' +
-      '<span>共 ' + list.length + ' 条</span></div>' +
-      '<div class="sched-table">' +
-        '<div class="sched-row head">' +
-          '<div>发布日期</div><div>时间</div><div class="sched-account">账号</div>' +
-          '<div>内容</div><div class="sched-shoot">拍摄日</div><div class="sched-status">脚本</div>' +
-        '</div>' +
-        list.map(r => {
-          const d = r.publish_at ? new Date(r.publish_at) : null;
-          const acc = ACC_BY_NAME[r.account] || { key:'' };
-          const hasSc = !!r.script_id;
-          const dateCell = d
-            ? '<b>' + pad(d.getMonth()+1) + '/' + pad(d.getDate()) + '</b>' + weekdayCN(d)
-            : '<b>—</b>';
-          return '<div class="sched-row">' +
-            '<div class="sched-date">' + dateCell + '</div>' +
-            '<div class="sched-time">' + esc(r.publish_slot || '') + '</div>' +
-            '<div class="sched-account"><span class="tag tag-account" data-k="' + esc(acc.key) + '">' + esc(r.account) + '</span></div>' +
-            '<div class="sched-title">' + esc(r.title) +
-              '<small>' + esc(r.platform) + (hasSc ? ' · 已配脚本' : ' · 待生成脚本') + '</small></div>' +
-            '<div class="sched-shoot">' + (r.shoot_date
-              ? '<span class="slot-pill is-shoot">' + esc(fmtCN(parseYmd(r.shoot_date)).replace(/^.*?日 /,'')) + ' 上午</span>'
-              : '—') + '</div>' +
-            '<div class="sched-status">' + (hasSc ? '<span class="mini-tag">已配</span>' : '<span class="hint" style="margin:0">待配</span>') + '</div>' +
-          '</div>';
-        }).join('') +
-      '</div></div>';
-  });
-  $('#scheduleBoard').innerHTML = html;
+  const rows=latestPlanRows();
+  const today=StudioWorkflow.dayKey();
+  if(!S.scheduleDay && S.loaded)S.scheduleDay=StudioWorkflow.nearestPlanDay(rows,{today,mode:S.scheduleMode,account:S.scheduleAccount});
+  const anchor=S.scheduleDay||today;
+  const days=StudioWorkflow.weekDays(anchor);
+  const accountNames=[...new Set([...rows.map(row=>row.account),S.scheduleAccount==='全部'?'':S.scheduleAccount])].filter(Boolean);
+  const options='<option value="全部">全部账号</option>'+accountNames.map(name=>'<option value="'+esc(name)+'">'+esc(name)+'</option>').join('');
+  if($('#scheduleAccount').innerHTML!==options)$('#scheduleAccount').innerHTML=options;
+  $('#scheduleAccount').value=S.scheduleAccount;
+  $$('#scheduleMode button').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.scheduleMode===S.scheduleMode)));
+  const shoot=S.scheduleMode==='shoot';
+  const {groups,undated}=StudioWorkflow.scheduleWeek(rows,{anchor,mode:S.scheduleMode,account:S.scheduleAccount});
+  const weekRows=groups.flatMap(group=>group.rows);
+  const shortDate=day=>Number(day.slice(5,7))+'月'+Number(day.slice(8))+'日';
+  $('#scheduleModeLabel').textContent=shoot?'SHOOTING WEEK':'PUBLISHING WEEK';
+  $('#scheduleWeekLabel').textContent=days[0].slice(0,4)+'年 '+shortDate(days[0])+' — '+(days[6].slice(0,4)!==days[0].slice(0,4)?days[6].slice(0,4)+'年 ':'')+shortDate(days[6]);
+  $('#scheduleSource').textContent=!S.loaded?(S.loadError?'暂时无法读取排期，请重新读取云端数据。':'正在读取排期…'):rows.length?'当前批次共 '+rows.length+' 条内容 · 按上海时间显示':'生成排期后，内容会按日期出现在这里。';
+  const stats=[[weekRows.length,shoot?'周内拍摄内容':'周内发布内容'],[new Set(weekRows.map(row=>row.account).filter(Boolean)).size,'涉及账号'],[weekRows.filter(row=>!scheduleScript(row)).length,'待配脚本']];
+  $('#scheduleOverview').innerHTML=stats.map(([count,label])=>'<div><strong>'+(S.loaded?count:'—')+'</strong><span>'+label+'</span></div>').join('');
+  $('#scheduleLegend').textContent=shoot?'拍摄安排是计划；进入拍摄模式查看镜头，不代表拍摄已完成。':'到达计划时间不会自动标为已发布；「已录入数据」来自关联的真实记录。';
+  $('#scheduleNoWeek').hidden=!S.loaded||!rows.length||!!weekRows.length;
+  $('#scheduleClear').hidden=S.scheduleAccount==='全部';
+  $('#scheduleNearest').hidden=!rows.some(row=>(S.scheduleAccount==='全部'||row.account===S.scheduleAccount)&&StudioWorkflow.scheduleDay(row,S.scheduleMode));
+  $('#scheduleEmpty').hidden=!S.loaded||!!rows.length;
+  $('#scheduleBoard').dataset.mode=S.scheduleMode;
+  $('#scheduleBoard').innerHTML=groups.filter(group=>!shoot||group.rows.length).map(({day,rows:list})=>'<section class="schedule-day'+(day===today?' is-today':'')+'" aria-label="'+shortDate(day)+' '+WD[days.indexOf(day)]+'"><header><div><span>'+WD[days.indexOf(day)]+'</span><strong>'+Number(day.slice(8))+'</strong></div><small>'+(day===today?'今天':list.length?list.length+' 条':'')+'</small></header><div class="schedule-day-tasks">'+(list.length?list.map(scheduleCard).join(''):'<p class="schedule-day-empty">'+(!S.loaded?'等待读取':shoot?'暂无拍摄':'暂无发布')+'</p>')+'</div></section>').join('');
+  $('#scheduleUndated').hidden=!undated.length;
+  $('#scheduleUndated').innerHTML=undated.length?'<h4>'+undated.length+' 条内容的'+(shoot?'拍摄':'发布')+'日期待补</h4><p class="hint">这些内容仍保留在当前批次，尚不能放入周历。</p><div class="schedule-undated-list">'+undated.map(scheduleCard).join('')+'</div>':'';
 }
 
 /* ---------------------------------------------------------------------
@@ -2988,6 +2972,7 @@ function switchView(v){
     else el.removeAttribute('aria-current');
   });
   if (v === 'home') renderHome();
+  if (v === 'schedule') renderSchedule();
   $$('.view').forEach(el => el.classList.toggle('is-active', el.id === 'view-' + v));
   $$('.tab').forEach(el => el.classList.toggle('is-active', el.dataset.view === v));
   /* 数据管理页显示的是实时条数，切过去时刷新一次 */
@@ -3173,6 +3158,26 @@ function bind(){
   });
 
   $('#btnAutoSchedule').addEventListener('click', runAutoSchedule);
+  const moveSchedule=day=>{
+    const old=S.scheduleDay||StudioWorkflow.dayKey();
+    if(StudioWorkflow.weekDays(old)[0]===StudioWorkflow.weekDays(day)[0])return;
+    S.scheduleDay=day;renderSchedule();
+    window.StudioMotion?.region($('#scheduleBoard'),day>old?1:-1);
+  };
+  $('#schedulePrev').addEventListener('click',()=>moveSchedule(StudioWorkflow.shiftDay(S.scheduleDay||StudioWorkflow.dayKey(),-7)));
+  $('#scheduleNext').addEventListener('click',()=>moveSchedule(StudioWorkflow.shiftDay(S.scheduleDay||StudioWorkflow.dayKey(),7)));
+  $('#scheduleToday').addEventListener('click',()=>moveSchedule(StudioWorkflow.dayKey()));
+  $('#scheduleNearest').addEventListener('click',()=>{
+    moveSchedule(StudioWorkflow.nearestPlanDay(latestPlanRows(),{mode:S.scheduleMode,account:S.scheduleAccount}));
+    $('#scheduleWeekLabel').setAttribute('tabindex','-1');$('#scheduleWeekLabel').focus({preventScroll:true});
+  });
+  $('#scheduleClear').addEventListener('click',()=>{S.scheduleAccount='全部';renderSchedule();$('#scheduleAccount').focus();});
+  $('#scheduleAccount').addEventListener('change',event=>{S.scheduleAccount=event.target.value;renderSchedule();window.StudioMotion?.region($('#scheduleBoard'));});
+  $('#scheduleMode').addEventListener('click',event=>{
+    const button=event.target.closest('[data-schedule-mode]');
+    if(!button||button.dataset.scheduleMode===S.scheduleMode)return;
+    S.scheduleMode=button.dataset.scheduleMode;renderSchedule();window.StudioMotion?.region($('#scheduleBoard'));
+  });
 
   $('#modal').addEventListener('click', e => {
     if (e.target.closest('[data-close]')) closeScript();
@@ -3542,7 +3547,7 @@ async function boot(){
   }catch(e){
     console.error(e);
     S.loadError = true;
-    renderHome();
+    renderHome(); renderSchedule();
     setSync('连接失败', 'is-err');
     toast('无法连接云服务：' + (e.message || e), 'err');
   }

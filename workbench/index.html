@@ -305,6 +305,8 @@ node start-jianying.cjs</code></pre>
   </section>
   <!-- ============ 自动排期 ============ -->
   <section class="view" id="view-schedule">
+    <div class="studio-page-heading"><div><p class="eyebrow">MAKE ROOM FOR GOOD CONTENT</p><h2>拍摄与发布，安排得刚刚好<span class="title-dot">.</span></h2><p>这一周，哪天拍、哪天发，都在这里。</p></div><button class="btn btn-ghost" data-route="scripts">查看脚本库 ↗</button></div>
+    <details class="schedule-generator" id="scheduleGenerator"><summary>生成新排期 <span>选择起始日期与周数，安排下一批内容</span></summary>
     <div class="panel">
       <div class="panel-head">
         <div>
@@ -325,11 +327,20 @@ node start-jianying.cjs</code></pre>
           <button class="btn btn-primary" id="btnAutoSchedule">生成排期</button>
         </div>
       </div>
-      <p class="hint" id="scheduleSource">排期范围：已勾选素材</p>
+      <p class="hint">生成范围：已勾选素材；未勾选时使用最新一批素材。</p>
     </div>
 
-    <div id="scheduleBoard"></div>
-    <div class="empty" id="scheduleEmpty" hidden>还没有排期。勾选素材后点「生成排期」。</div>
+    </details>
+    <section class="panel schedule-planner" aria-label="拍摄与发布周历">
+      <div class="schedule-toolbar"><div class="schedule-mode" id="scheduleMode" role="group" aria-label="排期视角"><button type="button" data-schedule-mode="publish" aria-pressed="true">发布安排</button><button type="button" data-schedule-mode="shoot" aria-pressed="false">拍摄安排</button></div><label class="script-account-field"><span>账号</span><select id="scheduleAccount" aria-label="筛选排期账号"><option value="全部">全部账号</option></select></label></div>
+      <div class="schedule-week-heading"><div><p class="eyebrow" id="scheduleModeLabel">PUBLISHING WEEK</p><h3 id="scheduleWeekLabel"></h3><p class="hint" id="scheduleSource">正在读取排期…</p></div><div class="calendar-nav"><button class="btn btn-ghost btn-sm" id="schedulePrev" aria-label="排期上一周">←</button><button class="btn btn-ghost btn-sm" id="scheduleToday">本周</button><button class="btn btn-ghost btn-sm" id="scheduleNext" aria-label="排期下一周">→</button></div></div>
+      <div class="schedule-overview" id="scheduleOverview" aria-live="polite"></div>
+      <p class="schedule-legend" id="scheduleLegend"></p>
+      <div class="schedule-no-week" id="scheduleNoWeek" hidden><p>这一周没有匹配的安排。</p><button class="text-button" id="scheduleNearest">查看最近排期 ↗</button><button class="text-button" id="scheduleClear">查看全部账号</button></div>
+      <div id="scheduleBoard" class="schedule-week-grid"></div>
+      <div id="scheduleUndated" class="schedule-undated" hidden></div>
+    </section>
+    <div class="empty" id="scheduleEmpty" hidden>还没有排期。展开「生成新排期」，安排第一批内容。</div>
   </section>
 
   <!-- ============ ④ 进度看板 ============ -->
