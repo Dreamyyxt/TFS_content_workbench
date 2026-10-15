@@ -1274,6 +1274,7 @@ const STATIC_FILES = new Set([
   '/studio-motion.js',
   '/studio-shooting.js',
   '/studio-workflow.js',
+  '/production-workflow.js',
 ]);
 const SRC_EXT_RE = /\.(js|mjs|cjs|jsx|ts|tsx|json|md|markdown|map|txt|lock|yml|yaml|toml|env|py|sh)$/i;
 

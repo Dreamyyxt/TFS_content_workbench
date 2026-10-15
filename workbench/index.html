@@ -252,6 +252,7 @@ node start-jianying.cjs</code></pre>
         <p class="hint">用法：① 在工作台文件夹下新建文本文件 <code>启动剪映制作.command</code>，把上面三行粘进去；② 首次给一次执行权限：终端运行 <code>chmod +x 启动剪映制作.command</code>；③ 双击运行（或终端 <code>./启动剪映制作.command</code>）。剪映不可用时火山生成仍可使用；启动后本机服务监听 <code>http://127.0.0.1:4191</code>。</p>
       </details>
     </div>
+    <section class="production-preparation" aria-label="提交前准备"><div><p class="eyebrow">READY TO CREATE</p><h3>提交前准备</h3><p class="hint">先备好内容与素材，再开始制作。</p></div><ol id="jyPreparation"></ol></section>
     <form id="jyForm">
       <div class="video-layout">
         <div class="panel video-script-panel">
@@ -296,7 +297,10 @@ node start-jianying.cjs</code></pre>
     </form>
     <div class="panel video-tasks">
       <div class="panel-head"><div><h3>制作任务</h3><p class="hint">查看制作进度、剪映工程与生成的视频。</p></div><button class="btn btn-ghost btn-sm" id="jyRefresh">刷新进度</button></div>
+      <div class="production-task-controls"><div id="jyJobFilters" class="chips" role="group" aria-label="筛选制作任务"></div><label class="studio-search"><span aria-hidden="true">⌕</span><input type="search" id="jyJobSearch" aria-label="搜索制作任务" placeholder="搜索标题、账号或制作方式" /></label></div>
+      <div class="production-task-results"><span id="jyJobCount" role="status" aria-live="polite"></span><button type="button" class="text-button" id="jyJobClear" hidden>清除筛选</button></div>
       <p id="jyPollingStatus" class="hint" role="status">任务状态每5秒自动刷新</p>
+      <div id="jyJobsEmpty" class="empty" hidden>没有匹配的任务，可清除筛选后再查看。</div>
       <div id="jyJobs"><div class="empty">还没有制作任务。提交后会在这里显示进度和结果。</div></div>
     </div>
   </section>
@@ -642,6 +646,7 @@ node start-jianying.cjs</code></pre>
 <script src="./account-settings.js"></script>
 <script src="./jy-catalog.js"></script>
 <script src="./edit-plan.js"></script>
+<script src="./production-workflow.js"></script>
 <script src="./jianying-studio.js"></script>
 </body>
 </html>
