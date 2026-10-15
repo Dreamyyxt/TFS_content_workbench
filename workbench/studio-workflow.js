@@ -54,6 +54,17 @@
         (!term||[row.title,row.keywords,row.account,row.angle,row.hook,row.trend_reason].join(' ').toLocaleLowerCase().includes(term));
     });
   }
+  function progressQueues(materials,scripts,plans,metrics,{now=Date.now()}={}){
+    const pending=materials.filter(row=>row.selected).map(material=>({material,script:scripts.find(script=>sameId(script.material_id,material.id))||null})).filter(({script})=>!String(script?.content||'').trim());
+    const open=plans.filter(row=>!metricForSchedule(row,metrics));
+    const dates=open.filter(row=>row.status!=='published'&&(!dayKey(row.shoot_date)||!dayKey(row.publish_at)));
+    const review=open.filter(row=>row.status==='published'||dayKey(row.publish_at)&&new Date(row.publish_at).getTime()<=now).slice().sort((a,b)=>{
+      const aTime=dayKey(a.publish_at)?new Date(a.publish_at).getTime():Infinity;
+      const bTime=dayKey(b.publish_at)?new Date(b.publish_at).getTime():Infinity;
+      return aTime-bTime;
+    });
+    return {pending,dates,review};
+  }
   function filterMetrics(rows,{account='全部',query='',period='all',today=dayKey()}={}){
     const term=query.trim().toLocaleLowerCase();
     const start=shiftDay(today,period==='7'?-6:-29);
@@ -109,5 +120,5 @@
     })}));
     return {groups,undated:filtered.filter(r=>!scheduleDay(r,mode))};
   }
-  return {filterMetrics,sortMetrics,metricSource,filterMaterials,sortScripts,scheduleDay,nearestPlanDay,scheduleWeek,sameId,dayKey,shiftDay,weekDays,rowsOnDay,metricForSchedule,isScriptScheduled,filterScripts};
+  return {progressQueues,filterMetrics,sortMetrics,metricSource,filterMaterials,sortScripts,scheduleDay,nearestPlanDay,scheduleWeek,sameId,dayKey,shiftDay,weekDays,rowsOnDay,metricForSchedule,isScriptScheduled,filterScripts};
 });

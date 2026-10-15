@@ -128,3 +128,21 @@ test('analytics traces only explicit schedule relationships and tolerates delete
   assert.deepEqual(flow.metricSource({schedule_id:999,title:'same title'},plans,scripts,materials),{script:null,material:null});
   assert.deepEqual(flow.metricSource({schedule_id:1},plans,[],[]),{script:null,material:null});
 });
+
+test('progress queues distinguish missing scripts, missing dates, due plans and actual metric links',()=>{
+  const materials=[{id:1,selected:true},{id:2,selected:true},{id:3,selected:true},{id:4,selected:false}];
+  const scripts=[{id:10,material_id:'1',content:'正文'},{id:20,material_id:2,content:'  '}];
+  const plans=[{id:1,publish_at:'2026-10-15T11:00:00+08:00',shoot_date:'2026-10-14'},
+    {id:2,publish_at:'2026-10-15T13:00:00+08:00',shoot_date:'2026-10-14'},
+    {id:3,publish_at:'invalid',shoot_date:'2026-02-30'},
+    {id:4,status:'published'},
+    {id:5,publish_at:'2026-10-15T09:00:00+08:00'},
+    {id:6,publish_at:'2026-10-15T12:00:00+08:00',shoot_date:'2026-10-14'}];
+  const snapshot=JSON.stringify({materials,scripts,plans});
+  const result=flow.progressQueues(materials,scripts,plans,[{schedule_id:'5'}],{now:Date.parse('2026-10-15T12:00:00+08:00')});
+  assert.deepEqual(result.pending.map(row=>row.material.id),[2,3]);
+  assert.equal(result.pending[0].script.id,20);assert.equal(result.pending[1].script,null);
+  assert.deepEqual(result.dates.map(row=>row.id),[3]);
+  assert.deepEqual(result.review.map(row=>row.id),[1,6,4]);
+  assert.equal(JSON.stringify({materials,scripts,plans}),snapshot);
+});

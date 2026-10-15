@@ -342,7 +342,14 @@ node start-jianying.cjs</code></pre>
 
   <!-- ============ ④ 进度看板 ============ -->
   <section class="view" id="view-progress">
-
+    <div class="studio-page-heading"><div><p class="eyebrow">CREATIVE MOMENTUM</p><h2>让每一步，都有下一步<span class="title-dot">.</span></h2><p>看清正在推进的内容，把需要处理的事接着做完。</p></div></div>
+    <section class="progress-actions-panel" aria-label="接下来处理">
+      <div class="panel-head"><div><p class="eyebrow">YOUR NEXT STEPS</p><h3>接下来处理</h3><p class="hint">脚本来自已选选题；日期与发布待办来自当前排期批次，同一内容可出现在不同类别。</p></div></div>
+      <div id="progressQueues" class="progress-queues" role="group" aria-label="待办类别"></div>
+      <p id="progressQueueHint" class="progress-queue-hint" role="status" aria-live="polite"></p>
+      <div id="progressTasks" class="progress-tasks"></div>
+      <div class="progress-task-pager"><span id="progressTaskCount"></span><button class="text-button" id="progressMore" hidden>再看 6 条 ↓</button></div>
+    </section>
     <div class="panel">
       <div class="panel-head">
         <div>
@@ -358,12 +365,12 @@ node start-jianying.cjs</code></pre>
     <div class="kpis" id="progressKpis"></div>
 
     <div class="panel">
-      <div class="panel-head"><div><h2>生产漏斗</h2><p class="hint">从选题到发布，看每一环漏了多少</p></div></div>
+      <div class="panel-head"><div><h2>创作阶段概览</h2><p class="hint">各环节的当前数量，帮助安排下一步工作</p></div></div>
       <div class="funnel" id="progressFunnel"></div>
     </div>
 
     <div class="panel">
-      <div class="panel-head"><div><h2>账号节奏达成率（本周）</h2><p class="hint">目标来自账号矩阵配比；「已发布」以「数据看板」录入的记录为准</p></div></div>
+      <div class="panel-head"><div><h2>本周录入与发布目标</h2><p class="hint">按上海时间统计本周发布日期；已录入数量不等于平台核验的发布数量</p></div></div>
       <div class="rate-list" id="progressRates"></div>
     </div>
 

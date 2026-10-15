@@ -524,6 +524,8 @@ const S = {
   dataQuery: '',
   dataPeriod: 'all',
   dataSort: 'newest',
+  progressQueue: 'pending',
+  progressLimit: 6,
   onlyLatest: true,
   selectedOnly: false,
   busy: false,
@@ -1347,7 +1349,7 @@ function renderBadges(){
   /* 进度看板角标＝需要处理的待办（未配脚本的排期 + 命中禁用词的脚本） */
   const bp = $('#badgeProgress');
   if (bp){
-    const todo = latestPlanRows().filter(r => !r.script_id).length + countRiskScripts().block;
+    const todo = latestPlanRows().filter(r => !String(scheduleScript(r)?.content||'').trim()).length + countRiskScripts().block;
     bp.textContent = todo;
     bp.dataset.zero = todo ? '0' : '1';
   }
@@ -2209,23 +2211,38 @@ function countRiskScripts(){
 
 /* 本周已发布的视频数据（以「数据看板」录入为准） */
 function metricsThisWeek(){
-  const mon = startOfWeek(new Date());
-  const end = addDays(mon, 7);
-  return S.metrics.filter(m => {
-    if (!m.publish_date) return false;
-    const d = parseYmd(m.publish_date);
-    return d >= mon && d < end;
-  });
+  const days=StudioWorkflow.weekDays(StudioWorkflow.dayKey());
+  return S.metrics.filter(row=>days.includes(StudioWorkflow.dayKey(row.publish_date)));
 }
 
 function planRowsThisWeek(){
-  const mon = startOfWeek(new Date());
-  const end = addDays(mon, 7);
-  return latestPlanRows().filter(r => {
-    if (!r.publish_at) return false;
-    const d = new Date(r.publish_at);
-    return !isNaN(d.getTime()) && d >= mon && d < end;
-  });
+  const days=StudioWorkflow.weekDays(StudioWorkflow.dayKey());
+  return latestPlanRows().filter(row=>days.includes(StudioWorkflow.dayKey(row.publish_at)));
+}
+
+function renderProgressTasks(queues){
+  const types=[['pending','待补脚本','已选选题缺少脚本正文。已有空脚本可查看，未关联脚本的选题可继续处理。'],['dates','待补日期','当前批次未标记发布、未关联数据的计划中，拍摄或发布日期缺失。可查看对应排期。'],['review','待核对发布','已标记发布或计划时间已到，尚未关联数据。先确认实际发布情况，再录入表现。']];
+  $('#progressQueues').innerHTML=types.map(([key,label],index)=>'<button type="button" class="progress-queue'+(key===S.progressQueue?' is-active':'')+'" data-progress-queue="'+key+'" aria-pressed="'+(key===S.progressQueue)+'"><span class="progress-queue-index">0'+(index+1)+'</span><span>'+label+'</span><strong>'+queues[key].length+'</strong><span aria-hidden="true">↗</span></button>').join('');
+  $('#progressQueueHint').textContent=types.find(([key])=>key===S.progressQueue)[2];
+  const rows=queues[S.progressQueue];
+  $('#progressTasks').innerHTML=rows.length?rows.slice(0,S.progressLimit).map(item=>{
+    const pending=S.progressQueue==='pending';
+    const row=pending?item.material:item;
+    let detail='',action='';
+    if(pending){
+      detail=item.script?'已有脚本，正文待补':'已选中，尚未关联脚本';
+      action=item.script?'<button class="btn btn-ghost btn-sm" data-open-script="'+esc(item.script.id)+'">查看脚本</button>':'<button class="btn btn-ghost btn-sm" data-focus-material="'+esc(row.id)+'">处理选题</button>';
+    }else if(S.progressQueue==='dates'){
+      detail=[!StudioWorkflow.dayKey(row.shoot_date)?'拍摄日期待补':'',!StudioWorkflow.dayKey(row.publish_at)?'发布日期待补':''].filter(Boolean).join(' · ');
+      action='<button class="btn btn-ghost btn-sm" data-progress-plan="'+esc(row.id)+'">查看排期</button>';
+    }else{
+      detail=(row.status==='published'?'已标记发布':'计划时间已到')+' · 尚未录入数据';
+      action='<button class="btn btn-ghost btn-sm" data-progress-plan="'+esc(row.id)+'">核对排期</button><button class="text-button" data-record-schedule="'+esc(row.id)+'">录入表现 ↗</button>';
+    }
+    return '<article class="progress-task" data-progress-item="'+esc(row.id)+'"><div><small>'+esc(row.account||'未指定账号')+'</small><h4>'+esc(row.title||'未命名内容')+'</h4><p>'+detail+'</p></div><div class="progress-task-actions">'+action+'</div></article>';
+  }).join(''):'<div class="progress-task-empty"><span aria-hidden="true">✓</span><strong>这一类暂时没有待办</strong><p>可切换其他类别，或查看下方的创作阶段与拍摄安排。</p></div>';
+  $('#progressTaskCount').textContent='显示 '+Math.min(rows.length,S.progressLimit)+' / '+rows.length+' 条';
+  $('#progressMore').hidden=rows.length<=S.progressLimit;
 }
 
 function kpiCard(label, value, sub, cls){
@@ -2247,7 +2264,9 @@ function renderProgress(){
   const planN = planRows.length;
   const pubN = S.metrics.length;
   const risk = countRiskScripts();
-  const noScript = planRows.filter(r => !r.script_id).length;
+  const noScript = planRows.filter(r => !String(scheduleScript(r)?.content||'').trim()).length;
+  const queues=StudioWorkflow.progressQueues(S.materials,S.scripts,planRows,S.metrics);
+  renderProgressTasks(queues);
 
   $('#progressMeta').textContent = '数据来自素材库 / 脚本库 / 排期表 / 数据看板 · 最近更新 ' +
     pad(new Date().getHours()) + ':' + pad(new Date().getMinutes()) +
@@ -2256,36 +2275,24 @@ function renderProgress(){
   /* ---- KPI ---- */
   $('#progressKpis').innerHTML = [
     kpiCard('候选素材', batchN, '最新一批 · 素材库共 ' + S.materials.length + ' 条', 'is-brand'),
-    kpiCard('待制作', selectedN, selectedN ? '已勾选，待出脚本' : '还没有勾选素材',
-      selectedN ? '' : ''),
+    kpiCard('待补脚本', queues.pending.length, '已勾选 '+selectedN+' 条 · 缺少正文的选题'),
     kpiCard('已出脚本', scriptN, '其中 ' + withScriptN + ' 条素材已配脚本'),
     kpiCard('已排期', planN, planN ? '批次 ' + (planRows[0].plan_batch || '') : '还没生成排期'),
-    kpiCard('已发布', pubN, pubN ? '以数据看板录入为准' : '还没录入视频数据',
+    kpiCard('已录入数据', pubN, pubN ? '手动录入的作品表现' : '还没录入视频数据',
       pubN ? 'is-ok' : ''),
     kpiCard('命中禁用词', risk.block, risk.block ? '发布前必须改写' : '无（已清零）',
       risk.block ? 'is-bad' : 'is-ok')
   ].join('');
 
-  /* ---- 生产漏斗 ---- */
-  const steps = [
-    { name:'候选素材', n:batchN },
-    { name:'加入待制作', n:selectedN },
-    { name:'已出脚本', n:scriptN },
-    { name:'已排期', n:planN },
-    { name:'已发布', n:pubN }
+  /* 各阶段来自不同范围，不将它们相除为转化率。 */
+  const steps=[
+    {name:'候选素材',n:batchN,scope:'最新一批',route:'materials'},
+    {name:'已选选题',n:selectedN,scope:'全部已勾选',route:'materials'},
+    {name:'脚本库',n:scriptN,scope:'全部脚本',route:'scripts'},
+    {name:'已排期',n:planN,scope:'当前排期批次',route:'schedule'},
+    {name:'已录入数据',n:pubN,scope:'全部作品记录',route:'data'}
   ];
-  const base = Math.max(1, steps[0].n);
-  $('#progressFunnel').innerHTML = steps.map((s, i) => {
-    const w = Math.max(2, Math.round(s.n / base * 100));
-    const pctOfPrev = i === 0 ? '' : (steps[i-1].n ? Math.round(s.n / steps[i-1].n * 100) + '%' : '—');
-    return '<div class="fn-row is-step' + (i+1) + '">' +
-      '<div class="fn-name">' + esc(s.name) + '</div>' +
-      '<div class="fn-bar"><div class="fn-fill" style="width:' + w + '%"></div></div>' +
-      '<div class="fn-num"><b>' + s.n + '</b>' + (pctOfPrev ? '<em>' + pctOfPrev + '</em>' : '') + '</div>' +
-      '</div>';
-  }).join('') +
-  '<p class="hint" style="margin-top:4px">每行右侧小字＝该环节相对上一环节的留存比例。' +
-  '「已发布」需要你在「数据看板」里录入后才会动。</p>';
+  $('#progressFunnel').innerHTML=steps.map((step,index)=>'<button class="progress-stage" data-route="'+step.route+'"><span class="progress-stage-index">0'+(index+1)+'</span><span>'+step.name+'</span><strong>'+step.n+'</strong><small>'+step.scope+'</small><span class="progress-stage-arrow" aria-hidden="true">↗</span></button>').join('')+'<p class="hint">各阶段统计范围不同，不作为同一批内容的转化率。</p>';
 
   /* ---- 账号节奏达成率 ---- */
   const weekPub = metricsThisWeek();
@@ -2308,39 +2315,38 @@ function renderProgress(){
 
   /* ---- 拍摄日负载 ---- */
   const shootMap = {};
-  planRows.forEach(r => { if (r.shoot_date) shootMap[r.shoot_date] = (shootMap[r.shoot_date] || 0) + 1; });
+  planRows.forEach(r => { const day=StudioWorkflow.dayKey(r.shoot_date);if(day)shootMap[day]=(shootMap[day]||0)+1; });
   const shoots = Object.keys(shootMap).sort();
-  const today = new Date(); today.setHours(0,0,0,0);
-  const nextShoot = shoots.find(d => parseYmd(d) >= today);
+  const today=StudioWorkflow.dayKey();
+  const nextShoot=shoots.find(day=>day>=today);
   $('#progressShoot').innerHTML = shoots.length
     ? shoots.map(d => {
         const dt = parseYmd(d);
         return '<div class="shoot-pill' + (d === nextShoot ? ' is-next' : '') + '">' +
           '<div class="sp-date">' + (dt.getMonth()+1) + '/' + dt.getDate() + ' ' + weekdayCN(dt) +
             (d === nextShoot ? ' · 下一场' : '') + '</div>' +
-          '<div class="sp-count">' + shootMap[d] + ' 条要拍 · 上午</div>' +
+          '<div class="sp-count">' + shootMap[d] + ' 条拍摄计划</div>' +
           '</div>';
       }).join('')
-    : '<p class="hint" style="margin:0">还没有排期。生成排期后这里会显示每个拍摄日要拍多少条。</p>';
+    : '<p class="hint" style="margin:0">'+(planRows.length?'当前批次尚未填写有效的拍摄日期。':'还没有排期。生成排期后这里会显示每个拍摄日的计划数量。')+'</p>';
 
   /* ---- 未来 7 天发布计划 ---- */
-  const now = new Date();
-  const limit = addDays(now, 7);
-  const upcoming = planRows.filter(r => {
-    if (!r.publish_at) return false;
-    const d = new Date(r.publish_at);
-    return !isNaN(d.getTime()) && d >= now && d <= limit;
-  }).slice(0, 12);
+  const endDay=StudioWorkflow.shiftDay(today,6);
+  const upcoming=planRows.filter(row=>{
+    const day=StudioWorkflow.dayKey(row.publish_at);return day&&day>=today&&day<=endDay;
+  }).slice().sort((a,b)=>new Date(a.publish_at)-new Date(b.publish_at)).slice(0,12);
   $('#progressUpcoming').innerHTML = upcoming.length
     ? upcoming.map(r => {
-        const d = new Date(r.publish_at);
+        const day=StudioWorkflow.dayKey(r.publish_at);
+        const d=parseYmd(day);
+        const script=scheduleScript(r);
         return '<div class="up-row">' +
           '<div class="up-date"><b>' + pad(d.getMonth()+1) + '/' + pad(d.getDate()) + '</b>' + weekdayCN(d) + '</div>' +
           '<div class="up-time">' + esc(r.publish_slot || '') + '</div>' +
           '<div class="up-title">' + esc(r.title) + '</div>' +
-          '<div>' + (r.script_id
-            ? '<span class="pill pill-ok">已配脚本</span>'
-            : '<span class="pill pill-warn">待配脚本</span>') + '</div>' +
+          '<div>' + (script&&String(script.content||'').trim()
+            ? '<button class="text-button" data-open-script="'+esc(script.id)+'">查看脚本 ↗</button>'
+            : '<span class="pill pill-warn">脚本待补</span>') + '</div>' +
           '</div>';
       }).join('')
     : '<p class="hint" style="margin:0">未来 7 天没有排期。先勾选素材并生成排期。</p>';
@@ -2362,7 +2368,7 @@ function renderProgress(){
     ? { cls:'is-warn', t:'有风险提示的脚本 ' + risk.warn + ' 支', d:'属于「提示级」（如出现"电话/保证"等表述），建议确认后再发。' }
     : { cls:'is-ok', t:'风险表述：0 支', d:'没有需要人工确认的提示级表述。' });
   notes.push(noScript
-    ? { cls:'is-warn', t:'已排期但未配脚本 ' + noScript + ' 条', d:'这些内容到了拍摄日会没东西可拍，建议先补脚本。' }
+    ? { cls:'is-warn', t:'排期脚本缺失或正文为空 ' + noScript + ' 条', d:'这些内容到了拍摄日会没东西可拍，建议先补脚本。' }
     : { cls:'is-ok', t:'排期脚本齐备', d:'当前批次的排期条目都已配脚本。' });
   notes.push(unsigned
     ? { cls:'is-warn', t:'未署名改动 ' + unsigned + ' 条', d:'素材/脚本里有记录没写操作人，出问题时不好追溯。建议在右上角填「当前操作人」。' }
@@ -2996,6 +3002,7 @@ function switchView(v){
   });
   if (v === 'home') renderHome();
   if (v === 'schedule') renderSchedule();
+  if (v === 'progress') renderProgress();
   $$('.view').forEach(el => el.classList.toggle('is-active', el.id === 'view-' + v));
   $$('.tab').forEach(el => el.classList.toggle('is-active', el.dataset.view === v));
   /* 数据管理页显示的是实时条数，切过去时刷新一次 */
@@ -3127,6 +3134,28 @@ function bind(){
   $('#dataFilter').addEventListener('change', e => {
     S.dataFilter = e.target.value;
     renderData();
+  });
+  $('#progressQueues').addEventListener('click',event=>{
+    const button=event.target.closest('[data-progress-queue]');if(!button)return;
+    S.progressQueue=button.dataset.progressQueue;S.progressLimit=6;
+    renderProgressTasks(StudioWorkflow.progressQueues(S.materials,S.scripts,latestPlanRows(),S.metrics));
+    $$('#progressQueues button').find(el=>el.dataset.progressQueue===S.progressQueue)?.focus({preventScroll:true});
+    window.StudioMotion?.region($('#progressTasks'));
+  });
+  $('#progressMore').addEventListener('click',()=>{
+    S.progressLimit+=6;
+    renderProgressTasks(StudioWorkflow.progressQueues(S.materials,S.scripts,latestPlanRows(),S.metrics));
+    if($('#progressMore').hidden){$('#progressTaskCount').tabIndex=-1;$('#progressTaskCount').focus({preventScroll:true});}
+  });
+  $('#progressTasks').addEventListener('click',event=>{
+    const button=event.target.closest('[data-progress-plan]');if(!button)return;
+    const row=latestPlanRows().find(row=>StudioWorkflow.sameId(row.id,button.dataset.progressPlan));if(!row)return;
+    S.scheduleAccount='全部';
+    S.scheduleMode=S.progressQueue==='dates'&&!StudioWorkflow.dayKey(row.shoot_date)?'shoot':'publish';
+    S.scheduleDay=StudioWorkflow.scheduleDay(row,S.scheduleMode)||StudioWorkflow.dayKey();
+    renderSchedule();switchView('schedule');
+    $$('#view-schedule [data-plan-id]').forEach(el=>el.tabIndex=-1);
+    focusWorkspaceItem('data-plan-id',row.id);
   });
   $('#dataSearch').addEventListener('input',event=>{S.dataQuery=event.target.value;renderData();});
   $('#dataSort').addEventListener('change',event=>{S.dataSort=event.target.value;renderData();});
