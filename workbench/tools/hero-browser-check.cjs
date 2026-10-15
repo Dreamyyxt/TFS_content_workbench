@@ -62,6 +62,13 @@ const labels={materials:'风口选题',scripts:'拍摄辅助',video:'视频制�
   await page.locator('.node-bottom-right').hover();await page.waitForTimeout(700);
   assert.ok(await assertAim()<6,'direction after resizing at '+width);
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'horizontal overflow at '+width);
+  const endpoints=await page.evaluate(()=>[...document.querySelectorAll('.network-flow')].map(path=>{
+    const point=path.getPointAtLength(path.getTotalLength());
+    const end=new DOMPoint(point.x,point.y).matrixTransform(path.getScreenCTM());
+    const node=document.querySelector('.network-node[data-route="'+path.dataset.networkRoute+'"] .node-orb').getBoundingClientRect();
+    return Math.hypot(end.x-node.left-node.width/2,end.y-node.top-node.height/2);
+  }));
+  assert.ok(endpoints.every(distance=>distance<8),'connections end inside their buttons at '+width);
  }
  await page.setViewportSize({width:1440,height:1000});
  await page.locator('#motionToggle').focus();await page.mouse.move(2,2);
@@ -112,6 +119,6 @@ const labels={materials:'风口选题',scripts:'拍摄辅助',video:'视频制�
   assert.ok(await mobileDemo.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
  }
  await mobileDemo.close();assert.deepEqual(requests,[]);assert.deepEqual(errors,[]);
- console.log('PASS: four module poses and matching paths, measured direction, fixed frame and single cancellable ripple, mixed keyboard/pointer priority, responsive aim, breathing pause, reduced motion, immediate navigation, no cloud writes, offline interactive preview.');
+ console.log('PASS: four module poses and matching paths, measured direction, fixed frame and single cancellable ripple, mixed keyboard/pointer priority, responsive aim and connection endpoints, breathing pause, reduced motion, immediate navigation, no cloud writes, offline interactive preview.');
  }finally{await browser.close()}
 })().catch(error=>{console.error(error);process.exitCode=1});

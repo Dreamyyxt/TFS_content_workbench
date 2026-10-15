@@ -150,6 +150,24 @@
     video:['视频制作','PRODUCE'], schedule:['发布日历','PUBLISH']
   };
 
+  function connectNodes() {
+    const svg = network?.querySelector('.network-lines');
+    const box = svg?.getBoundingClientRect();
+    const center = core?.getBoundingClientRect();
+    if (!box?.width || !box.height || !center?.width) return;
+    const {width, height} = svg.viewBox.baseVal;
+    const x = (center.left + center.width/2 - box.left) * width/box.width;
+    const y = (center.top + center.height/2 - box.top) * height/box.height;
+    network.querySelectorAll('.network-node[data-route]').forEach(node => {
+      const target = node.querySelector('.node-orb').getBoundingClientRect();
+      const tx = (target.left + target.width/2 - box.left) * width/box.width;
+      const ty = (target.top + target.height/2 - box.top) * height/box.height;
+      const bend = (tx-x)*.48;
+      const curve = `M${x} ${y}C${x+bend} ${y} ${tx-bend} ${ty} ${tx} ${ty}`;
+      network.querySelectorAll('[data-network-route="'+node.dataset.route+'"]').forEach(path => path.setAttribute('d',curve));
+    });
+  }
+
   function aim(route) {
     const node = network?.querySelector('.network-node[data-route="'+route+'"] .node-orb');
     const center = core?.getBoundingClientRect();
@@ -202,6 +220,9 @@
       const subtitle=document.getElementById('coreModuleSub');
       if(title)title.textContent=moduleLabels[route]?.[0] || '灵感，在这里生长';
       if(subtitle)subtitle.textContent=moduleLabels[route]?.[1] || 'CONTENT STUDIO';
+      play(core?.querySelector('.core-label'),
+        [{opacity:.4,transform:'translateY(3px)'},{opacity:1,transform:'translateY(0)'}],
+        {duration:220},core);
     }
   }
 
@@ -231,6 +252,7 @@
     resetTilt();
     highlight();
     sync();
+    if(view === 'home')connectNodes();
     refresh(view, true);
   }
 
@@ -263,7 +285,15 @@
   network?.addEventListener('keydown', event => {
     if(event.key==='Tab'){inputMode='keyboard';highlight();}
   });
-  if(network && typeof ResizeObserver==='function')new ResizeObserver(()=>{if(linkedRoute && activeView==='home')aim(linkedRoute)}).observe(network);
+  if(network && typeof ResizeObserver==='function'){
+    const observer = new ResizeObserver(()=>{
+      if(activeView!=='home')return;
+      connectNodes();
+      if(linkedRoute)aim(linkedRoute);
+    });
+    observer.observe(network);
+    network.querySelectorAll('.network-node').forEach(node=>observer.observe(node));
+  }
   network?.addEventListener('focusout', () => queueMicrotask(highlight));
   network?.addEventListener('pointermove', event => {
     if (!enabled() || activeView !== 'home' || !pointer.matches || event.pointerType !== 'mouse') return;
@@ -279,5 +309,6 @@
 
   window.StudioMotion = {enter, refresh, enabled, region, snapshot, settle, selection, dialog};
   sync();
+  connectNodes();
   refresh('home', true);
 })();
