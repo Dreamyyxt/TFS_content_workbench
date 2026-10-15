@@ -521,6 +521,9 @@ const S = {
   accountConfigRecord:null,accountSettingsLoaded:false,
   filter: '全部',
   dataFilter: '全部',
+  dataQuery: '',
+  dataPeriod: 'all',
+  dataSort: 'newest',
   onlyLatest: true,
   selectedOnly: false,
   busy: false,
@@ -2407,8 +2410,7 @@ function sum(list, pick){
 }
 
 function visibleMetrics(){
-  if (S.dataFilter === '全部') return S.metrics;
-  return S.metrics.filter(m => m.account === S.dataFilter);
+  return StudioWorkflow.filterMetrics(S.metrics,{account:S.dataFilter,query:S.dataQuery,period:S.dataPeriod});
 }
 
 function renderData(){
@@ -2416,10 +2418,17 @@ function renderData(){
   if (!$('#dataKpis')) return;
   const list = visibleMetrics();
 
-  $('#dataMeta').textContent = S.metrics.length
-    ? '共 ' + S.metrics.length + ' 条记录 · 手动录入 · 最后更新 ' +
-      new Date().toLocaleTimeString('zh-CN', { hour:'2-digit', minute:'2-digit' })
-    : '还没有数据。点右上角「录入一条数据」，把平台后台的数字抄进来。';
+  fillDataFilter();
+  const filtered=S.dataFilter!=='全部'||!!S.dataQuery.trim()||S.dataPeriod!=='all';
+  $('#dataClear').hidden=!filtered;
+  $$('[data-data-period]').forEach(button=>{
+    const active=button.dataset.dataPeriod===S.dataPeriod;
+    button.classList.toggle('is-active',active);button.setAttribute('aria-pressed',String(active));
+  });
+  const today=StudioWorkflow.dayKey();
+  const period=S.dataPeriod==='all'?'全部时间':S.dataPeriod==='undated'?'未填或无效发布日期':StudioWorkflow.shiftDay(today,S.dataPeriod==='7'?-6:-29)+' — '+today+'（含今天 · 上海时间）';
+  $('#dataScope').textContent=period+' · '+S.dataFilter+' · 显示 '+list.length+' / '+S.metrics.length+' 条；指标、图表与回溯同步筛选。';
+  $('#dataMeta').textContent='手动录入平台后台数据；修改筛选只影响查看范围。';
 
   const totalViews = sum(list, m => m.views);
   const avgF3 = avg(list, m => m.finish_3s);
@@ -2430,7 +2439,7 @@ function renderData(){
   renderDataVisuals(list, avgF3);
 
   $('#dataKpis').innerHTML = [
-    kpiCard('已录入视频', list.length, '当前账号范围 · 共 ' + S.metrics.length + ' 条', 'is-brand'),
+    kpiCard('已录入视频', list.length, '当前筛选范围 · 共 ' + S.metrics.length + ' 条', 'is-brand'),
     kpiCard('总播放量', nfNum(totalViews), list.length ? list.length + ' 条合计' : '暂无数据'),
     kpiCard('平均 3 秒完播', avgF3 == null ? '—' : nfPct(avgF3), '参考线 ≥ ' + THRESH.f3 + '%',
       avgF3 == null ? '' : (avgF3 >= THRESH.f3 ? 'is-ok' : 'is-warn')),
@@ -2444,7 +2453,8 @@ function renderData(){
   /* 明细表 */
   if (!list.length){
     $('#dataTable').innerHTML = '<p class="hint" style="margin:0">' +
-      (S.metrics.length ? '当前筛选条件下没有数据。' : '还没有录入数据。') + '</p>';
+      (S.metrics.length ? '当前筛选条件下没有数据。' : '还没有录入数据。') + '</p>'+
+      (filtered?'<button class="btn btn-ghost btn-sm" data-clear-data-filters>清除筛选</button>':'');
   } else {
     $('#dataTable').innerHTML =
       '<table class="dtable"><thead><tr>' +
@@ -2454,12 +2464,12 @@ function renderData(){
         '<th class="num">商品点击</th><th class="num">核销</th><th class="num">涨粉</th>' +
         '<th></th>' +
       '</tr></thead><tbody>' +
-      list.map(m => {
-        const d = m.publish_date ? parseYmd(m.publish_date) : null;
+      StudioWorkflow.sortMetrics(list,S.dataSort).map(m => {
+        const day = StudioWorkflow.dayKey(m.publish_date);
         const cr = clickRate(m);
         const acc = ACC_BY_NAME[m.account] || { key:'' };
-        return '<tr>' +
-          '<td>' + (d ? (d.getMonth()+1) + '/' + d.getDate() : '—') + '</td>' +
+        return '<tr data-metric-id="'+esc(m.id)+'">' +
+          '<td>' + (day || '未填日期') + '</td>' +
           '<td class="dt-title">' + esc(m.title || '') +
             '<small><span class="tag tag-account" data-k="' + esc(acc.key) + '">' + esc(m.account) + '</span> ' +
             esc(m.platform || '') +
@@ -2476,8 +2486,8 @@ function renderData(){
           '<td class="num">' + nfNum(m.groupon_redeemed) + '</td>' +
           '<td class="num">' + nfNum(m.followers_gain) + '</td>' +
           '<td class="cell-actions">' +
-            '<button class="btn btn-ghost btn-sm" data-editmetric="' + m.id + '">编辑</button>' +
-            '<button class="btn-danger-ghost" data-delmetric="' + m.id + '">删除</button>' +
+            '<button class="btn btn-ghost btn-sm" data-editmetric="' + esc(m.id) + '">编辑</button>' +
+            '<button class="btn-danger-ghost" data-delmetric="' + esc(m.id) + '">删除</button>' +
           '</td>' +
         '</tr>';
       }).join('') +
@@ -2492,14 +2502,18 @@ function renderData(){
     return (Number(b.views)||0) - (Number(a.views)||0);
   }).slice(0, 8);
   $('#dataRank').innerHTML = ranked.length
-    ? ranked.map((m, i) =>
-        '<div class="rank-row' + (i === 0 ? ' is-top' : '') + '">' +
+    ? ranked.map((m, i) => {
+        const source=StudioWorkflow.metricSource(m,S.schedules,S.scripts,S.materials);
+        return '<div class="rank-row' + (i === 0 ? ' is-top' : '') + '">' +
         '<div class="rank-no">' + (i+1) + '</div>' +
         '<div class="rank-title">' + esc(m.title || '') +
           '<small>' + esc(m.account) + ' · 播放 ' + nfNum(m.views) +
-          (m.groupon_redeemed ? ' · 核销 ' + nfNum(m.groupon_redeemed) : '') + '</small></div>' +
+          (m.groupon_redeemed ? ' · 核销 ' + nfNum(m.groupon_redeemed) : '') + '</small><div class="rank-source-links">'+
+          (source.material?'<button class="text-button" data-focus-material="'+esc(source.material.id)+'">回看选题 ↗</button>':'')+
+          (source.script?'<button class="text-button" data-open-script="'+esc(source.script.id)+'">查看脚本 ↗</button>':'')+
+          (!source.material&&!source.script?'<span>暂无可回溯的选题或脚本</span>':'')+'</div></div>' +
         '<div class="rank-score"><b>' + (m.finish_3s == null ? '—' : nfPct(m.finish_3s)) + '</b><br>3 秒完播</div>' +
-        '</div>').join('')
+        '</div>';}).join('')
     : '<p class="hint" style="margin:0">录入数据后，这里会按 3 秒完播率排出表现最好的选题，' +
       '下一轮「刷新风口」就可以照着加码同类素材。</p>';
 }
@@ -2525,12 +2539,13 @@ function fillMetricControls(){
     }).join('');
 }
 
-/* 账号筛选下拉（只在启动时建一次，避免录入时把筛选状态重置掉） */
+/* 包含历史账号；刷新选项时保留当前筛选。 */
 function fillDataFilter(){
   const sel = $('#dataFilter');
   if (!sel) return;
-  sel.innerHTML = '<option value="全部">全部账号</option>' + ACCOUNTS.map(a =>
-    '<option value="' + esc(a.name) + '">' + esc(a.name) + '</option>').join('');
+  const names=[...new Set([...ACCOUNTS.map(a=>a.name),...S.metrics.map(m=>m.account),S.dataFilter])].filter(name=>name&&name!=='全部');
+  const options='<option value="全部">全部账号</option>'+names.map(name=>'<option value="'+esc(name)+'">'+esc(name)+'</option>').join('');
+  if(sel.innerHTML!==options)sel.innerHTML=options;
   sel.value = S.dataFilter;
 }
 
@@ -2959,8 +2974,9 @@ function bindStudioWorkflow(){
 function renderDataVisuals(list, average){
   const byDay = new Map();
   list.forEach(m => {
-    if(!/^\d{4}-\d{2}-\d{2}$/.test(m.publish_date || '')) return;
-    byDay.set(m.publish_date, (byDay.get(m.publish_date) || 0) + Math.max(0,Number(m.views)||0));
+    const day=StudioWorkflow.dayKey(m.publish_date);
+    if(!day)return;
+    byDay.set(day, (byDay.get(day) || 0) + Math.max(0,Number(m.views)||0));
   });
   const days = [...byDay.entries()].sort(([a],[b])=>a.localeCompare(b)).slice(-7);
   const max = Math.max(1,...days.map(([,v])=>v));
@@ -3112,6 +3128,16 @@ function bind(){
     S.dataFilter = e.target.value;
     renderData();
   });
+  $('#dataSearch').addEventListener('input',event=>{S.dataQuery=event.target.value;renderData();});
+  $('#dataSort').addEventListener('change',event=>{S.dataSort=event.target.value;renderData();});
+  $('#view-data').addEventListener('click',event=>{
+    const period=event.target.closest('[data-data-period]');
+    if(period){S.dataPeriod=period.dataset.dataPeriod;renderData();return;}
+    if(event.target.closest('#dataClear, [data-clear-data-filters]')){
+      S.dataFilter='全部';S.dataQuery='';S.dataPeriod='all';
+      $('#dataSearch').value='';renderData();$('#dataSearch').focus();
+    }
+  });
   $('#mSchedule').addEventListener('change', e => {
     const r = latestPlanRows().find(x => String(x.id) === e.target.value);
     if (!r) return;
@@ -3119,9 +3145,9 @@ function bind(){
   });
   $('#dataTable').addEventListener('click', e => {
     const ed = e.target.closest('[data-editmetric]');
-    if (ed){ openMetricForm(Number(ed.dataset.editmetric)); return; }
+    if (ed){ const metric=S.metrics.find(row=>StudioWorkflow.sameId(row.id,ed.dataset.editmetric));if(metric){openMetricForm(metric.id);$('#mTitle').focus();}return; }
     const dl = e.target.closest('[data-delmetric]');
-    if (dl) delMetric(Number(dl.dataset.delmetric));
+    if (dl){const metric=S.metrics.find(row=>StudioWorkflow.sameId(row.id,dl.dataset.delmetric));if(metric)delMetric(metric.id);}
   });
 
   $('#accountFilter').addEventListener('click', e => {

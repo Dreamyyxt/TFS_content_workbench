@@ -54,6 +54,36 @@
         (!term||[row.title,row.keywords,row.account,row.angle,row.hook,row.trend_reason].join(' ').toLocaleLowerCase().includes(term));
     });
   }
+  function filterMetrics(rows,{account='全部',query='',period='all',today=dayKey()}={}){
+    const term=query.trim().toLocaleLowerCase();
+    const start=shiftDay(today,period==='7'?-6:-29);
+    return rows.filter(row=>{
+      const day=dayKey(row.publish_date);
+      return (account==='全部'||row.account===account) &&
+        (!term||[row.title,row.account,row.platform,row.note].join(' ').toLocaleLowerCase().includes(term)) &&
+        (period==='all'||period==='undated'&&!day||['7','30'].includes(period)&&day&&day>=start&&day<=today);
+    });
+  }
+  function sortMetrics(rows,order='newest'){
+    const value=row=>{
+      if(order==='newest')return dayKey(row.publish_date)||null;
+      const raw=row[order==='retention'?'finish_3s':'views'];
+      return raw==null||String(raw).trim()===''||!Number.isFinite(Number(raw))?null:Number(raw);
+    };
+    return rows.slice().sort((a,b)=>{
+      const av=value(a),bv=value(b);
+      if(av===null)return bv===null?0:1;
+      if(bv===null)return -1;
+      return typeof av==='string'?bv.localeCompare(av):bv-av;
+    });
+  }
+  function metricSource(metric,schedules,scripts,materials){
+    const plan=schedules.find(row=>sameId(row.id,metric.schedule_id));
+    if(!plan)return {script:null,material:null};
+    const script=scripts.find(row=>sameId(row.id,plan.script_id))||null;
+    const material=materials.find(row=>sameId(row.id,plan.material_id??script?.material_id))||null;
+    return {script,material};
+  }
   function sortScripts(entries,order='newest'){
     return entries.slice().sort((a,b)=>{
       if(order==='title')return String(a.script.title||'').localeCompare(String(b.script.title||''),'zh-CN');
@@ -79,5 +109,5 @@
     })}));
     return {groups,undated:filtered.filter(r=>!scheduleDay(r,mode))};
   }
-  return {filterMaterials,sortScripts,scheduleDay,nearestPlanDay,scheduleWeek,sameId,dayKey,shiftDay,weekDays,rowsOnDay,metricForSchedule,isScriptScheduled,filterScripts};
+  return {filterMetrics,sortMetrics,metricSource,filterMaterials,sortScripts,scheduleDay,nearestPlanDay,scheduleWeek,sameId,dayKey,shiftDay,weekDays,rowsOnDay,metricForSchedule,isScriptScheduled,filterScripts};
 });

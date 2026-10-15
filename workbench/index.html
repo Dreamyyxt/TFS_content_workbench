@@ -387,7 +387,12 @@ node start-jianying.cjs</code></pre>
   <!-- ============ ⑤ 数据看板 ============ -->
   <section class="view" id="view-data">
 
-    <div class="studio-page-heading"><div><p class="eyebrow">CONTENT ANALYTICS</p><h2>每一次发布，都有回响<span class="title-dot">.</span></h2><p>看见内容的表现，找到下一次创作的方向。</p></div><label class="inline-field">账号 <select id="dataFilter"><option value="全部">全部</option></select></label></div>
+    <div class="studio-page-heading"><div><p class="eyebrow">CONTENT ANALYTICS</p><h2>每一次发布，都有回响<span class="title-dot">.</span></h2><p>看见内容的表现，找到下一次创作的方向。</p></div></div>
+    <section class="analytics-controls" aria-label="数据复盘范围">
+      <div class="analytics-controls-head"><div><p class="eyebrow">REVIEW YOUR CONTENT</p><h3>这一次，复盘哪些作品？</h3></div><label class="studio-search"><span aria-hidden="true">⌕</span><input id="dataSearch" type="search" aria-label="搜索作品数据" placeholder="搜索作品标题、平台或备注" /></label></div>
+      <div class="analytics-controls-tools"><div class="chips" role="group" aria-label="发布日期范围"><button class="chip is-active" data-data-period="all" aria-pressed="true">全部时间</button><button class="chip" data-data-period="7" aria-pressed="false">近 7 天</button><button class="chip" data-data-period="30" aria-pressed="false">近 30 天</button><button class="chip" data-data-period="undated" aria-pressed="false">未填日期</button></div><label class="script-account-field"><span>账号</span><select id="dataFilter"><option value="全部">全部账号</option></select></label><button class="text-button" id="dataClear" hidden>清除筛选</button></div>
+      <p id="dataScope" class="analytics-scope" role="status" aria-live="polite"></p>
+    </section>
     <div class="panel">
       <div class="panel-head">
         <div>
@@ -441,15 +446,14 @@ node start-jianying.cjs</code></pre>
         <div><h2>逐条明细</h2>
           <p class="hint">达标线（行业经验值，可用自己账号历史校准）：3 秒完播 ≥40% · 5 秒完播 ≥25% · 商品点击 ≥3%</p>
         </div>
-        <div class="panel-actions">
-
-        </div>
+        <label class="script-account-field"><span>明细排序</span><select id="dataSort"><option value="newest">最近发布</option><option value="views">播放量优先</option><option value="retention">3 秒完播优先</option></select></label>
       </div>
-      <div class="table-wrap" id="dataTable"></div>
+      <p class="analytics-table-hint">明细可横向滚动，查看互动、转化与编辑入口。</p>
+      <div class="table-wrap" id="dataTable" tabindex="0" role="region" aria-label="作品数据明细，可横向滚动"></div>
     </div>
 
     <div class="panel">
-      <div class="panel-head"><div><h2>选题回溯</h2><p class="hint">哪类选题真的跑得动 —— 用来反哺「素材选择库」的下一轮刷新方向</p></div></div>
+      <div class="panel-head"><div><h2>选题回溯</h2><p class="hint">按 3 秒完播率排序，播放量用于同分排序；可回看已关联的选题与脚本。</p></div></div>
       <div class="rank-list" id="dataRank"></div>
     </div>
   </section>
