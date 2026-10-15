@@ -1686,9 +1686,9 @@ function renderScripts(){
         '<div class="script-state-tags"><span class="tag tag-plain">' + (scheduled ? '当前已排期' : '当前未排期') + '</span><span class="risk risk-' + (r === 'pass' ? 'ok' : r === 'block' ? 'block' : r === 'empty' ? 'empty' : 'warn') + '">' + rLabel + '</span></div>' +
       '</div>' + scriptCardPreview(s.content) +
       '<div class="script-foot">'+
-        '<button class="btn btn-primary btn-sm" data-viewscript="'+esc(s.id)+'">查看完整脚本</button>'+
-        '<button class="btn btn-ghost btn-sm" data-shoot-script="'+esc(s.id)+'"'+(String(s.content||'').trim()?'':' disabled title="脚本为空"')+'>拍摄模式</button>'+
-        '<button class="text-button script-video-link" data-makevideo="'+esc(s.id)+'">开始制作 ↗</button>'+
+        '<button class="btn btn-ghost" data-viewscript="'+esc(s.id)+'">查看完整脚本</button>'+
+        '<button class="btn btn-ghost" data-shoot-script="'+esc(s.id)+'"'+(String(s.content||'').trim()?'':' disabled title="脚本为空"')+'>拍摄模式</button>'+
+        '<button class="btn btn-primary script-make-button" data-makevideo="'+esc(s.id)+'">开始制作 <span aria-hidden="true">↗</span></button>'+
       '</div><details class="script-review"><summary>自检与管理<span>'+ (!hasContent?'等待正文':live.hits.length?'自检有 '+live.hits.length+' 处提示':toneN?'有 '+toneN+' 项表达提示':'暂无自检提示')+'</span></summary><div class="script-review-body">'+
         '<p>自检：'+(hasContent?esc(hits):'暂无正文，尚未检查')+'</p>'+(toneN?'<p>去 AI 味：'+esc(toneBrief)+'</p>':'')+
         '<div class="script-review-actions">'+(live.hits.length?'<button class="btn btn-fix btn-sm" data-fixscript="'+esc(s.id)+'">一键替换禁用词</button>':'')+
