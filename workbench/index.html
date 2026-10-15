@@ -172,15 +172,11 @@
       </div>
     </div>
 
-    <div class="filterbar">
-      <div class="chips" id="accountFilter" role="group" aria-label="按账号筛选选题"></div>
-      <label class="switch">
-        <input type="checkbox" id="onlyLatest" checked />
-        <span>仅看最新一批</span>
-      </label>
-    </div>
-
-    <div class="library-toolbar"><h3>灵感选题库 <span id="materialResultCount"></span></h3><button type="button" class="chip" id="selectedOnly" aria-pressed="false">只看已选</button><label class="studio-search"><span aria-hidden="true">⌕</span><input type="search" id="materialSearch" placeholder="搜索标题、关键词或账号" aria-label="搜索选题" /></label></div>
+    <section class="topic-library-controls" aria-label="筛选灵感选题">
+      <div class="library-toolbar"><div><p class="eyebrow">YOUR IDEA COLLECTION</p><h3>灵感选题库 <span id="materialResultCount"></span></h3></div><label class="studio-search"><span aria-hidden="true">⌕</span><input type="search" id="materialSearch" placeholder="搜索标题、开场或关键词" aria-label="搜索选题" /></label></div>
+      <div class="filterbar"><div class="chips" id="accountFilter" role="group" aria-label="按账号筛选选题"></div></div>
+      <div class="topic-filter-tools"><label class="script-account-field"><span>形式</span><select id="materialForm" aria-label="筛选选题形式"><option value="全部">全部形式</option></select></label><label class="script-account-field"><span>脚本</span><select id="materialStatus" aria-label="筛选选题脚本状态"><option value="all">全部状态</option><option value="unwritten">待写脚本</option><option value="written">已有脚本</option></select></label><button type="button" class="chip" id="selectedOnly" aria-pressed="false">只看已选</button><label class="switch"><input type="checkbox" id="onlyLatest" checked /><span>仅看最新一批</span></label><button type="button" class="text-button" id="materialClear" hidden>清除筛选</button></div>
+    </section>
     <div class="grid" id="materialGrid"></div>
     <div class="empty" id="materialEmpty" hidden>
       还没有素材。点右上角「同步联网风向」载入本季风向选题，或「生成新的视频计划」让 AI 按热点出新一批。

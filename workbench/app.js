@@ -501,6 +501,8 @@ const S = {
   loaded: false,
   loadError: false,
   search: '',
+  materialForm: '全部',
+  materialStatus: 'all',
   scriptQuery: '',
   scriptAccount: '全部',
   scriptStatus: 'all',
@@ -690,11 +692,7 @@ function visibleMaterials(){
     const b = latestBatch();
     if (b) list = list.filter(m => m.batch_id === b);
   }
-  if (S.filter !== '全部') list = list.filter(m => m.account === S.filter);
-  if (S.selectedOnly) list = list.filter(m => m.selected);
-  const query = S.search.trim().toLocaleLowerCase();
-  if(query) list = list.filter(m => [m.title,m.keywords,m.account,m.angle,m.hook].join(' ').toLocaleLowerCase().includes(query));
-  return list;
+  return StudioWorkflow.filterMaterials(list,S.scripts,{query:S.search,account:S.filter,selectedOnly:S.selectedOnly,form:S.materialForm,status:S.materialStatus});
 }
 
 /* 相对时间 / 绝对时间 */
@@ -1174,21 +1172,14 @@ async function collectWebTrend(){
 }
 
 function renderFilter(){
-  const counts = {};
-  ACCOUNTS.forEach(a => counts[a.name] = 0);
-  const pool = S.onlyLatest ? S.materials.filter(m => m.batch_id === latestBatch()) : S.materials;
-  pool.forEach(m => { if (counts[m.account] != null) counts[m.account]++; });
-  const total = Object.values(counts).reduce((x,y) => x+y, 0);
-  let html = '<button class="chip' + (S.filter === '全部' ? ' is-active' : '') + '" data-acc="全部" aria-pressed="'+(S.filter==='全部')+'">全部<small>' + total + '</small></button>';
-  ACCOUNTS.forEach(a => {
-    html += '<button class="chip' + (S.filter === a.name ? ' is-active' : '') + '" data-acc="' + esc(a.name) + '" aria-pressed="'+(S.filter===a.name)+'">' +
-      esc(a.name) + '<small>' + counts[a.name] + '</small></button>';
-  });
-  $('#accountFilter').innerHTML = html;
+  const batch=latestBatch();
+  const pool=S.onlyLatest&&batch?S.materials.filter(m=>m.batch_id===batch):S.materials;
+  const names=[...new Set([...ACCOUNTS.map(account=>account.name),...pool.map(row=>row.account)])].filter(Boolean);
+  $('#accountFilter').innerHTML=[['全部',pool.length],...names.map(name=>[name,pool.filter(row=>row.account===name).length])].map(([name,count])=>'<button class="chip'+(S.filter===name?' is-active':'')+'" data-acc="'+esc(name)+'" aria-pressed="'+(S.filter===name)+'">'+esc(name)+'<small>'+count+'</small></button>').join('');
 }
 
 function scriptForMaterial(id){
-  return S.scripts.find(s => s.material_id === id) || null;
+  return S.scripts.find(s => StudioWorkflow.sameId(s.material_id,id)) || null;
 }
 
 function renderMaterials(){
@@ -1203,8 +1194,16 @@ function renderMaterials(){
   const list = visibleMaterials();
   $('#selectedOnly').setAttribute('aria-pressed',String(S.selectedOnly));
   $('#selectedOnly').classList.toggle('is-active',S.selectedOnly);
-  $('#materialResultCount').textContent = list.length + ' 个选题';
-  $('#materialEmpty').textContent = S.selectedOnly ? '当前筛选范围里还没有已选选题。可关闭「只看已选」继续挑选。' : S.search || S.filter !== '全部' ? '没有匹配的选题，试试其他关键词或账号。' : '还没有选题。点击「实时采集风向」获取灵感，或载入趋势底稿。';
+  const batch=latestBatch();
+  const pool=S.onlyLatest&&batch?S.materials.filter(m=>m.batch_id===batch):S.materials;
+  const forms=[...new Set([...pool.map(row=>row.content_form),S.materialForm==='全部'?'':S.materialForm])].filter(Boolean);
+  const options='<option value="全部">全部形式</option>'+forms.map(form=>'<option value="'+esc(form)+'">'+esc(form)+'</option>').join('');
+  if($('#materialForm').innerHTML!==options)$('#materialForm').innerHTML=options;
+  $('#materialForm').value=S.materialForm;$('#materialStatus').value=S.materialStatus;
+  const filtered=!!S.search.trim()||S.filter!=='全部'||S.selectedOnly||S.materialForm!=='全部'||S.materialStatus!=='all';
+  $('#materialClear').hidden=!filtered;
+  $('#materialResultCount').textContent='显示 '+list.length+' / '+pool.length+' 个 · '+(S.onlyLatest?'最新一批':'全部批次');
+  $('#materialEmpty').innerHTML=filtered?'<strong>没有匹配的选题</strong><p>试试其他关键词、账号、形式或脚本状态。</p><button class="btn btn-ghost btn-sm" data-clear-material-filters>清除筛选</button>':'<strong>这里还没有选题</strong><p>可在上方实时采集风向，或载入趋势底稿。</p>';
   if (!list.length){
     grid.innerHTML = '';
     $('#materialEmpty').hidden = false;
@@ -1217,27 +1216,20 @@ function renderMaterials(){
     const acc = ACC_BY_NAME[m.account] || { key:'', platform:m.platform };
     const sc = scriptForMaterial(m.id);
     const kws = String(m.keywords || '').split(/[,，]/).filter(Boolean);
-    return '' +
-    '<article class="card' + (m.selected ? ' is-selected' : '') + (sc ? ' has-script' : '') + '" data-material-id="' + esc(m.id) + '" tabindex="-1">' +
-      '<div class="card-top">' +
-        '<span class="tag tag-account" data-k="' + esc(acc.key) + '">' + esc(m.account) + '</span>' +
-        (m.content_form ? '<span class="tag tag-plain">' + esc(m.content_form) + '</span>' : '') +
-        (m.goal ? '<span class="tag tag-goal">' + esc(m.goal) + '</span>' : '') +
-        (m.priority === 'high' ? '<span class="tag tag-high">重点</span>' : '') +
-        (sc ? '<span class="mini-tag">已有脚本</span>' : '') +
-      '</div>' +
-      '<h3 class="card-title">' + esc(m.title) + '</h3>' +
-      (m.angle ? '<div class="card-line"><b>角度</b><span>' + esc(m.angle) + '</span></div>' : '') +
-      (m.hook ? '<div class="card-line"><b>钩子</b><span>' + esc(m.hook) + '</span></div>' : '') +
-      (kws.length ? '<div class="card-kw">' + kws.map(k => '<span>' + esc(k.trim()) + '</span>').join('') + '</div>' : '') +
-      (m.trend_reason ? '<div class="card-reason">' + esc(m.trend_reason) + '</div>' : '') +
-      '<div class="card-foot">' +
-        '<button type="button" class="pick" aria-pressed="' + !!m.selected + '" aria-disabled="'+(clearingSelection || selectionWrites.has(m.id))+'" data-pick="' + esc(m.id) + '">' +
-          (selectionWrites.has(m.id) ? '保存中…' : m.selected ? '✓ 已加入待制作' : '+ 加入待制作') +
-        '</button>' +
-        '<button class="btn-danger-ghost" data-del="' + m.id + '" title="删除该素材">删除</button>' +
-      '</div>' +
-    '</article>';
+    return '<article class="card topic-card'+(m.selected?' is-selected':'')+(sc?' has-script':'')+'" data-material-id="'+esc(m.id)+'" tabindex="-1">'+
+      '<div class="card-top"><span class="tag tag-account" data-k="'+esc(acc.key)+'">'+esc(m.account)+'</span>'+(m.content_form?'<span class="tag tag-plain">'+esc(m.content_form)+'</span>':'')+(m.priority==='high'?'<span class="tag tag-high">重点</span>':'')+'</div>'+
+      '<h3 class="card-title">'+esc(m.title||'未命名选题')+'</h3>'+
+      '<div class="topic-hook"><span>开场灵感</span><blockquote>'+esc(m.hook||'这条选题还没有填写开场。')+'</blockquote></div>'+
+      '<details class="topic-details"><summary>选题思路与关键词 <span aria-hidden="true">＋</span></summary><div class="topic-details-body">'+
+        (m.angle?'<div class="card-line"><b>角度</b><span>'+esc(m.angle)+'</span></div>':'')+
+        (m.goal?'<div class="card-line"><b>目标</b><span>'+esc(m.goal)+'</span></div>':'')+
+        (m.trend_reason?'<div class="card-reason"><b>选题理由</b>'+esc(m.trend_reason)+'</div>':'')+
+        (kws.length?'<div class="card-kw">'+kws.map(k=>'<span>'+esc(k.trim())+'</span>').join(''):'')+
+        (!m.angle&&!m.goal&&!m.trend_reason&&!kws.length?'<p class="hint">暂无补充思路。</p>':'')+
+        '<button class="btn-danger-ghost" data-del="'+esc(m.id)+'" title="删除该素材">删除选题</button></div></details>'+
+      '<div class="topic-script-state">'+(sc?'<span class="mini-tag">已有脚本</span>':'<span>待写脚本</span>')+'</div>'+
+      '<div class="card-foot"><button type="button" class="pick" aria-pressed="'+!!m.selected+'" aria-disabled="'+(clearingSelection||selectionWrites.has(m.id))+'" data-pick="'+esc(m.id)+'">'+(selectionWrites.has(m.id)?'保存中…':m.selected?'✓ 已加入待制作':'+ 加入待制作')+'</button>'+
+        (sc?'<button class="text-button" data-open-script="'+esc(sc.id)+'">查看脚本 ↗</button>':'')+'</div></article>';
   }).join('');
   window.StudioMotion?.settle(grid,previous,'data-material-id');
   restorePick();
@@ -2887,7 +2879,7 @@ function openMaterialWorkspace(id){
     S.pendingOnly=false;$('#pendingOnly').checked=false;renderPending();
     switchView('scripts');focusWorkspaceItem('data-pending-id',material.id);
   }else{
-    S.search='';S.filter='全部';S.onlyLatest=false;S.selectedOnly=false;
+    S.search='';S.filter='全部';S.onlyLatest=false;S.selectedOnly=false;S.materialForm='全部';S.materialStatus='all';
     $('#materialSearch').value='';$('#onlyLatest').checked=false;
     renderFilter();renderMaterials();switchView('materials');focusWorkspaceItem('data-material-id',material.id);
   }
@@ -3004,6 +2996,13 @@ function bind(){
     if(route){ switchView(route.dataset.route); $('#views').focus({preventScroll:true}); }
   });
   $('#materialSearch').addEventListener('input', e => { S.search = e.target.value; renderMaterials(); });
+  $('#materialForm').addEventListener('change',event=>{S.materialForm=event.target.value;renderMaterials();});
+  $('#materialStatus').addEventListener('change',event=>{S.materialStatus=event.target.value;renderMaterials();});
+  $('#view-materials').addEventListener('click',event=>{
+    if(!event.target.closest('#materialClear, [data-clear-material-filters]'))return;
+    S.search='';S.filter='全部';S.selectedOnly=false;S.materialForm='全部';S.materialStatus='all';
+    $('#materialSearch').value='';renderFilter();renderMaterials();$('#materialSearch').focus();
+  });
   bindStudioWorkflow();
 
   $('#tabs').addEventListener('click', e => {

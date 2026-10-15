@@ -79,3 +79,15 @@ test('script sorting is stable, keeps unknown dates last, and does not mutate so
   assert.deepEqual(flow.sortScripts(entries,'title').map(e=>e.script.id),[2,1,3,4,5]);
   assert.deepEqual(entries.map(e=>e.script.id),[1,2,3,4,5]);
 });
+
+test('topic filters compose form, script state, selection and search without changing stored selection',()=>{
+  const rows=[{id:1,account:'A',content_form:'实拍',selected:true,title:'琥珀',trend_reason:'换季需求'},
+    {id:2,account:'A',content_form:'口播',selected:false,title:'日常'},
+    {id:3,account:'旧账号',content_form:'实拍',selected:true,title:'门店',trend_reason:'换季需求'}];
+  const scripts=[{material_id:'1'},{material_id:2}];const before=JSON.stringify(rows);
+  assert.deepEqual(flow.filterMaterials(rows,scripts,{query:'换季',form:'实拍',status:'written',selectedOnly:true}).map(r=>r.id),[1]);
+  assert.deepEqual(flow.filterMaterials(rows,scripts,{status:'unwritten',account:'旧账号'}).map(r=>r.id),[3]);
+  assert.deepEqual(flow.filterMaterials(rows,scripts,{account:'A',form:'口播',status:'written'}).map(r=>r.id),[2]);
+  assert.equal(flow.filterMaterials(rows,scripts,{form:'口播',selectedOnly:true}).length,0);
+  assert.equal(JSON.stringify(rows),before);
+});

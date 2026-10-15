@@ -44,6 +44,16 @@
       (!term || [script.title,script.account,script.content].join(' ').toLocaleLowerCase().includes(term)) &&
       (status==='all' || status==='scheduled' && scheduled || status==='unplanned' && !scheduled || status==='review' && scan.hits.length>0));
   }
+  function filterMaterials(rows,scripts,{query='',account='全部',selectedOnly=false,form='全部',status='all'}={}){
+    const term=query.trim().toLocaleLowerCase();
+    return rows.filter(row=>{
+      const hasScript=scripts.some(script=>sameId(script.material_id,row.id));
+      return (account==='全部'||row.account===account) && (!selectedOnly||row.selected) &&
+        (form==='全部'||row.content_form===form) &&
+        (status==='all'||status==='written'&&hasScript||status==='unwritten'&&!hasScript) &&
+        (!term||[row.title,row.keywords,row.account,row.angle,row.hook,row.trend_reason].join(' ').toLocaleLowerCase().includes(term));
+    });
+  }
   function sortScripts(entries,order='newest'){
     return entries.slice().sort((a,b)=>{
       if(order==='title')return String(a.script.title||'').localeCompare(String(b.script.title||''),'zh-CN');
@@ -69,5 +79,5 @@
     })}));
     return {groups,undated:filtered.filter(r=>!scheduleDay(r,mode))};
   }
-  return {sortScripts,scheduleDay,nearestPlanDay,scheduleWeek,sameId,dayKey,shiftDay,weekDays,rowsOnDay,metricForSchedule,isScriptScheduled,filterScripts};
+  return {filterMaterials,sortScripts,scheduleDay,nearestPlanDay,scheduleWeek,sameId,dayKey,shiftDay,weekDays,rowsOnDay,metricForSchedule,isScriptScheduled,filterScripts};
 });
