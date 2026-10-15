@@ -65,3 +65,17 @@ test('nearest plan keeps the current week, then finds upcoming or most recent ma
   assert.equal(flow.nearestPlanDay([],{today:'2027-01-01'}),'2027-01-01');
   assert.deepEqual(flow.scheduleWeek(rows,{anchor:'2027-01-01'}).groups.map(g=>g.day),flow.weekDays('2027-01-01'));
 });
+
+test('script sorting is stable, keeps unknown dates last, and does not mutate source order',()=>{
+  const entries=[
+    {script:{id:1,title:'B',created_at:'2026-10-13T16:30:00Z'}},
+    {script:{id:2,title:'A',created_at:'2026-10-14T08:00:00+08:00'}},
+    {script:{id:3,title:'C',created_at:'invalid'}},
+    {script:{id:4,title:'D'}},
+    {script:{id:5,title:'E',created_at:'2026-10-13T16:30:00Z'}}
+  ];
+  assert.deepEqual(flow.sortScripts(entries).map(e=>e.script.id),[2,1,5,3,4]);
+  assert.deepEqual(flow.sortScripts(entries,'oldest').map(e=>e.script.id),[1,5,2,3,4]);
+  assert.deepEqual(flow.sortScripts(entries,'title').map(e=>e.script.id),[2,1,3,4,5]);
+  assert.deepEqual(entries.map(e=>e.script.id),[1,2,3,4,5]);
+});

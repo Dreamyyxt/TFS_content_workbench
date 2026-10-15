@@ -213,11 +213,12 @@
 
       <div class="col-right">
         <div class="panel-head">
-          <h2>脚本库</h2>
+          <div><p class="eyebrow">YOUR SCRIPT COLLECTION</p><h2>脚本库</h2></div>
           <span class="hint" id="scriptMeta"></span>
         </div>
         <div class="script-tools"><label class="studio-search"><span aria-hidden="true">⌕</span><input type="search" id="scriptSearch" placeholder="搜索标题、正文或账号" aria-label="搜索脚本" /></label><label class="script-account-field"><span>账号</span><select id="scriptAccount" aria-label="筛选脚本账号"><option value="全部">全部账号</option></select></label></div>
         <div class="chips script-status-filter" id="scriptStatusFilter" role="group" aria-label="筛选脚本状态"></div>
+        <div class="script-result-tools"><label class="script-account-field"><span>排序</span><select id="scriptSort" aria-label="脚本排序"><option value="newest">最近创建</option><option value="oldest">最早创建</option><option value="title">标题顺序</option></select></label><button type="button" class="text-button" id="scriptClear" hidden>清除筛选</button></div>
         <p class="script-scope-note">排期状态以当前批次为准；已排期不代表视频已制作完成。</p>
         <div class="script-list" id="scriptList"></div>
         <div class="empty" id="scriptEmpty" hidden>还没有生成脚本。</div>

@@ -504,6 +504,7 @@ const S = {
   scriptQuery: '',
   scriptAccount: '全部',
   scriptStatus: 'all',
+  scriptSort: 'newest',
   pendingOnly: false,
   homeDay: StudioWorkflow.dayKey(),
   scheduleDay: null,
@@ -1632,20 +1633,36 @@ function renderPending(){
   }).join('');
 }
 
+function scriptCardPreview(content){
+  const plan=ShootingPlan.parse(content);
+  if(plan.mode==='shots'){
+    const panels=plan.steps.slice(0,2).map((step,index)=>{
+      const scene=step.fields.find(field=>/画面|运镜|拍摄内容|镜头内容/.test(field.label));
+      const voice=step.fields.find(field=>/口播|台词|旁白/.test(field.label));
+      return '<div class="script-shot"><span class="script-shot-index">'+String(index+1).padStart(2,'0')+'</span><div><span class="script-shot-time">'+esc(step.time||'时间未标注')+'</span><p>'+esc(scene?.text||'该镜头未填写画面')+'</p>'+(voice?.text?'<small>口播 · '+esc(voice.text)+'</small>':'')+'</div></div>';
+    }).join('');
+    return '<div class="script-storyboard"><div class="script-preview-heading"><span>分镜预览</span><small>共 '+plan.steps.length+' 镜 · 展示前 '+Math.min(2,plan.steps.length)+' 镜</small></div><div class="script-shot-grid">'+panels+'</div></div>';
+  }
+  return '<div class="script-storyboard"><div class="script-preview-heading"><span>原文预览</span><small>'+(plan.mode==='empty'?'暂无正文':'打开完整脚本继续阅读')+'</small></div><p class="script-source-excerpt">'+esc(String(content||'').trim().slice(0,500)||'这份脚本还没有正文。')+'</p></div>';
+}
+
 function renderScripts(){
   const box = $('#scriptList');
   const previous = window.StudioMotion?.snapshot(box);
   const rows = latestPlanRows();
   const entries = S.scripts.map(script=>({script,scan:complianceScan(script.content),scheduled:StudioWorkflow.isScriptScheduled(script,rows)}));
   const baseFilter = {query:S.scriptQuery,account:S.scriptAccount};
-  const list = StudioWorkflow.filterScripts(entries,{...baseFilter,status:S.scriptStatus});
+  const list = StudioWorkflow.sortScripts(StudioWorkflow.filterScripts(entries,{...baseFilter,status:S.scriptStatus}),S.scriptSort);
   const accountNames = [...new Set([...ACCOUNTS.map(a=>a.name),...S.scripts.map(s=>s.account)])].filter(Boolean);
   const options = '<option value="全部">全部账号</option>' + accountNames.map(name=>'<option value="'+esc(name)+'">'+esc(name)+'</option>').join('');
   if ($('#scriptAccount').innerHTML !== options) $('#scriptAccount').innerHTML = options;
   $('#scriptAccount').value = S.scriptAccount;
   $('#scriptStatusFilter').innerHTML = [['all','全部'],['unplanned','未排期'],['scheduled','已排期'],['review','需检查']].map(([key,label])=>'<button class="chip'+(S.scriptStatus===key?' is-active':'')+'" type="button" data-script-status="'+key+'" aria-pressed="'+(S.scriptStatus===key)+'">'+label+'<small>'+StudioWorkflow.filterScripts(entries,{...baseFilter,status:key}).length+'</small></button>').join('');
   $('#scriptMeta').textContent = '显示 ' + list.length + ' / ' + S.scripts.length + ' 份';
-  $('#scriptEmpty').textContent = S.scripts.length ? '没有匹配的脚本，试试其他关键词、账号或状态。' : '还没有脚本。从左侧选题生成第一份。';
+  const filtered=!!S.scriptQuery.trim()||S.scriptAccount!=='全部'||S.scriptStatus!=='all';
+  $('#scriptClear').hidden=!filtered;
+  $('#scriptSort').value=S.scriptSort;
+  $('#scriptEmpty').innerHTML = S.scripts.length ? '<strong>没有找到匹配的脚本</strong><p>试试其他关键词、账号或状态。</p><button class="btn btn-ghost btn-sm" data-clear-script-filters>清除筛选</button>' : '<strong>从一个选题，开始第一份脚本</strong><p>选中的选题可以在左侧生成脚本。</p><button class="btn btn-ghost btn-sm" data-route="materials">去选题库 ↗</button>';
   if (!list.length){
     box.innerHTML = '';
     $('#scriptEmpty').hidden = false;
@@ -1656,37 +1673,29 @@ function renderScripts(){
   box.innerHTML = list.map(({script:s,scan:live,scheduled}) => {
     const acc = ACC_BY_NAME[s.account] || { key:'' };
     /* 合规等级实时计算，避免与入库时的旧口径不一致 */
-    const r = live.level;
-    const rLabel = r === 'pass' ? '合规通过' : r === 'warn' ? '有风险提示' : r === 'block' ? '命中禁用词' : '未自检';
+    const hasContent=!!String(s.content||'').trim();
+    const r = hasContent?live.level:'empty';
+    const rLabel = r === 'pass' ? '合规通过' : r === 'warn' ? '有风险提示' : r === 'block' ? '命中禁用词' : r === 'empty' ? '暂无正文' : '未自检';
     const hits = live.hits.length ? live.hits.map(h => h.group + '：' + h.word).join('；') : '无';
     /* 去 AI 味自检：只统计需要改写的 AI 腔 / 广告腔，不含分镜表里的正常排版特征 */
     const tone = humanTone(s.content);
     const toneN = humanToneCount(tone);
     const toneBrief = humanToneBrief(tone);
-    const when = s.created_at ? new Date(s.created_at) : null;
-    return '<article class="script-card" data-script-id="' + esc(s.id) + '" tabindex="-1">' +
-      '<div class="script-head">' +
-        '<div>' +
-          '<h4>' + esc(s.title) + '</h4>' +
-          '<div class="meta">' + esc(s.account) + (s.duration ? ' · ' + esc(s.duration) : '') +
-            (when ? ' · ' + (when.getMonth()+1) + '月' + when.getDate() + '日' : '') + '</div>' +
-        '</div>' +
-        '<div class="script-state-tags"><span class="tag tag-plain">' + (scheduled ? '当前已排期' : '当前未排期') + '</span><span class="risk risk-' + (r === 'pass' ? 'ok' : r === 'block' ? 'block' : 'warn') + '">' + rLabel + '</span></div>' +
-      '</div>' +
-      '<div class="script-preview">' + esc(String(s.content || '').replace(/[#*|]/g,'').slice(0, 260)) + '</div>' +
-      '<div class="script-foot">' +
-        '<button class="btn btn-ghost btn-sm" data-shoot-script="'+esc(s.id)+'"'+(String(s.content || '').trim()?'':' disabled title="脚本为空"')+'>拍摄模式</button>' +
-        '<button class="btn btn-primary btn-sm" data-makevideo="' + esc(s.id) + '">开始制作</button>' +
-        '<button class="btn btn-primary btn-sm" data-viewscript="' + s.id + '">查看完整脚本</button>' +
-        (live.hits.length
-          ? '<button class="btn btn-fix btn-sm" data-fixscript="' + s.id + '">一键替换禁用词</button>'
-          : '') +
-        (hits !== '无' ? '<span class="hint" style="margin:0">自检：' + esc(hits) + '</span>' : '') +
-        (toneN ? '<span class="hint" style="margin:0">去AI味：' + esc(toneBrief) + '</span>' : '') +
-        '<span style="flex:1"></span>' +
-        '<button class="btn-danger-ghost" data-delscript="' + s.id + '">删除</button>' +
-      '</div>' +
-    '</article>';
+    const day=StudioWorkflow.dayKey(s.created_at);
+    return '<article class="script-card script-library-card" data-script-id="' + esc(s.id) + '" tabindex="-1">' +
+      '<div class="script-head"><div class="script-card-intro">' +
+        '<div class="script-card-meta"><span class="tag tag-account" data-k="'+esc(acc.key)+'">'+esc(s.account)+'</span>'+(s.duration?'<span>'+esc(s.duration)+'</span>':'')+(day?'<time datetime="'+day+'">'+Number(day.slice(5,7))+'月'+Number(day.slice(8))+'日创建</time>':'')+'</div>'+
+        '<h4>'+esc(s.title||'未命名脚本')+'</h4></div>'+
+        '<div class="script-state-tags"><span class="tag tag-plain">' + (scheduled ? '当前已排期' : '当前未排期') + '</span><span class="risk risk-' + (r === 'pass' ? 'ok' : r === 'block' ? 'block' : r === 'empty' ? 'empty' : 'warn') + '">' + rLabel + '</span></div>' +
+      '</div>' + scriptCardPreview(s.content) +
+      '<div class="script-foot">'+
+        '<button class="btn btn-primary btn-sm" data-viewscript="'+esc(s.id)+'">查看完整脚本</button>'+
+        '<button class="btn btn-ghost btn-sm" data-shoot-script="'+esc(s.id)+'"'+(String(s.content||'').trim()?'':' disabled title="脚本为空"')+'>拍摄模式</button>'+
+        '<button class="text-button script-video-link" data-makevideo="'+esc(s.id)+'">开始制作 ↗</button>'+
+      '</div><details class="script-review"><summary>自检与管理<span>'+ (!hasContent?'等待正文':live.hits.length?'自检有 '+live.hits.length+' 处提示':toneN?'有 '+toneN+' 项表达提示':'暂无自检提示')+'</span></summary><div class="script-review-body">'+
+        '<p>自检：'+(hasContent?esc(hits):'暂无正文，尚未检查')+'</p>'+(toneN?'<p>去 AI 味：'+esc(toneBrief)+'</p>':'')+
+        '<div class="script-review-actions">'+(live.hits.length?'<button class="btn btn-fix btn-sm" data-fixscript="'+esc(s.id)+'">一键替换禁用词</button>':'')+
+        '<button class="btn-danger-ghost" data-delscript="'+esc(s.id)+'">删除脚本</button></div></div></details></article>';
   }).join('');
   window.StudioMotion?.settle(box,previous);
 }
@@ -2898,6 +2907,12 @@ function applyScheduleToMetric(row){
 function bindStudioWorkflow(){
   $('#scriptSearch').addEventListener('input',event=>{S.scriptQuery=event.target.value;renderScripts();});
   $('#scriptAccount').addEventListener('change',event=>{S.scriptAccount=event.target.value;renderScripts();});
+  $('#scriptSort').addEventListener('change',event=>{S.scriptSort=event.target.value;renderScripts();});
+  $('#view-scripts').addEventListener('click',event=>{
+    if(!event.target.closest('#scriptClear, [data-clear-script-filters]'))return;
+    S.scriptQuery='';S.scriptAccount='全部';S.scriptStatus='all';
+    $('#scriptSearch').value='';renderScripts();$('#scriptSearch').focus();
+  });
   $('#scriptStatusFilter').addEventListener('click',event=>{
     const button=event.target.closest('[data-script-status]');if(!button)return;
     S.scriptStatus=button.dataset.scriptStatus;renderScripts();

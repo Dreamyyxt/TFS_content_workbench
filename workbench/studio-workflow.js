@@ -44,6 +44,16 @@
       (!term || [script.title,script.account,script.content].join(' ').toLocaleLowerCase().includes(term)) &&
       (status==='all' || status==='scheduled' && scheduled || status==='unplanned' && !scheduled || status==='review' && scan.hits.length>0));
   }
+  function sortScripts(entries,order='newest'){
+    return entries.slice().sort((a,b)=>{
+      if(order==='title')return String(a.script.title||'').localeCompare(String(b.script.title||''),'zh-CN');
+      const aTime=a.script.created_at?Date.parse(a.script.created_at):NaN;
+      const bTime=b.script.created_at?Date.parse(b.script.created_at):NaN;
+      if(!Number.isFinite(aTime))return Number.isFinite(bTime)?1:0;
+      if(!Number.isFinite(bTime))return -1;
+      return order==='oldest'?aTime-bTime:bTime-aTime;
+    });
+  }
   const scheduleDay=(row,mode='publish')=>dayKey(mode==='shoot'?row.shoot_date:row.publish_at);
   function nearestPlanDay(rows,{mode='publish',account='全部',today=dayKey()}={}){
     const dates=rows.filter(r=>account==='全部'||r.account===account).map(r=>scheduleDay(r,mode)).filter(Boolean).sort();
@@ -59,5 +69,5 @@
     })}));
     return {groups,undated:filtered.filter(r=>!scheduleDay(r,mode))};
   }
-  return {scheduleDay,nearestPlanDay,scheduleWeek,sameId,dayKey,shiftDay,weekDays,rowsOnDay,metricForSchedule,isScriptScheduled,filterScripts};
+  return {sortScripts,scheduleDay,nearestPlanDay,scheduleWeek,sameId,dayKey,shiftDay,weekDays,rowsOnDay,metricForSchedule,isScriptScheduled,filterScripts};
 });
