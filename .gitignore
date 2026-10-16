@@ -1,11 +1,17 @@
+# 系统
 .DS_Store
+
+# 运行时数据（本机专属，含绝对路径 / 体量大，勿入库）
 .video-data/
-__pycache__/
-*.pyc
+.jianying-data/
+.editing-deps/
+.editing-models/
 outputs/video-p0-acceptance/
 outputs/jianying-skill-check/
 
-.jianying-data/
+# Python
+__pycache__/
+*.pyc
 
-.editing-deps/
-.editing-models/
+# 部署标记：localDir 写死本机绝对路径，入库后跨设备克隆会误导
+.wbapp_*.genie*
