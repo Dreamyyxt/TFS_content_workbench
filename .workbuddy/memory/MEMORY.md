@@ -153,6 +153,17 @@
   能识别「`/Volumes/xxx` 只是残留空目录」。实测 `/Volumes/家庭共享` dev=905969673 vs `/Volumes` dev=16777234
   （`fs.existsSync()` 单独不够用）。
 
+### 备份策略（10-16 用户定调：本地承载一切换速度，NAS 每天归档兜底）
+- 用户明确**不打算**再复制一整份目录镜像到 NAS；主目录本地保留 `.editing-deps`/`.jianying-data` 是为了**加速制作**。
+- 因此归档工具在 2026-10-16 增加了**工作台快照**：归档末尾覆盖式写 `<目标>/_工作台快照/`
+  - `state.json`（97KB）—— 任务列表与状态，即工作台 UI 的全部历史
+  - `环境清单.md`（~3KB）—— git 提交/远端/未提交数、Node 与 Python 路径、`.editing-deps` 全部包版本
+    （**并标出多版本残留**：`pip install --target` 升级会留旧 dist-info，实测有 `av` 16.1.0/19.0.1、`multidict` 6.9.1/7.1.0）、
+    剪映草稿清单、模型目录与生成缓存清单；并附「重装要做什么」提示（edge-tts 必须 ≥7.3.1）
+  - 开关：`--no-snapshot`、`--snapshot-dir=`、环境变量 `WJ_SNAPSHOT_DIR`；预览模式只提示不写盘
+- **仍不在归档范围内的**（换机器要单独处理）：`.editing-models`(141M)、`~/.codex/skills/jianying-editor`、
+  剪映草稿实体 `~/Movies/JianyingPro/User Data/Projects/com.lveditor.draft`。代码与记忆在 GitHub，无虞。
+
 ## §7 去 AI 味（L3：固化进提示词，不是事后润色）
 
 - 规则 `workbench/humanizer-policy.js`（UMD，浏览器 + Node 共用），口径见 `workbench/HUMANIZER.md`。
@@ -272,15 +283,13 @@
 
 ## §14 待办 / 已知风险
 
-- ⚠️ **`~/Projects/TFS_content_workbench` 是唯一副本**（含 `.editing-deps` 220M 与 `.jianying-data` 525M，均被 gitignore）
-  → 建议定期把整个目录复制一份到 NAS 或移动硬盘；光靠 GitHub 只能恢复代码，恢复不了依赖与任务数据。
+- ✅ **备份路线已定**（10-16）：不再做整份镜像；靠「每日归档 + 工作台快照」（见 §6 末）。代码与记忆在 GitHub。
 - 线上已于 **10-16 15:22 更新到 `main`**（含 PR#11 界面优化）；线上 `index.html` `a6d4d0c3d465fa54`、
   `studio.css` `79161f0baa82dd64` 均与本地一致。**并实测确认：不传 `appId` 从新路径发布也命中同一应用。**
 - ⚠️ **不要删除当前会话的工作目录**（10-16 把空的 `2026-10-05-12-31-27` 移入废纸篓后，
-  Bash 工具因 cwd 不存在整体失效，报 `Working directory does not exist`）。已在原路径留占位空目录 + `README-已迁移.md`。
-  切换工作空间后可在 Finder 里删掉，或先重建占位再删。
+  Bash 工具因 cwd 不存在整体失效，报 `Working directory does not exist`）。已在原路径留占位空目录 + `README-已迁移.md`
+  （发布工具还会往这里写 `.wbapp_*.genie`，属既有行为）。
 - `tools/publish.sh` / `docs/PUBLISH.md` 仍写着「同步镜像再发布」的旧流程，镜像已不存在 → 待改写成「直接从主目录发布」。
-- 回收站待清（可选）：`旧工作区副本-已收割-20261016-151721`、`旧工作区空壳-20261016-151721`。
-- `~/WorkBuddy/第五季内容工作台`（889M）**尚未删除**，等用户决定。已实证其**无任何独有内容**
-  （HEAD 落后 2 个提交、无本地独有提交、任务素材是主目录的子集；独有的只有已废应用的 `.genie` 与一个**空目录** `workbench/test`）。
+- 废纸篓待清（可选）：`旧工作区副本-已收割-20261016-151721`、`旧工作区空壳-20261016-151721`、
+  **`第五季内容工作台`（889M，用户于 10-16 15:4x 自行删除；已实证无任何独有内容）**。
 - 未解释：编辑页偶发 `ERR_FILE_NOT_FOUND` 控制台报错（已确认不影响功能）。
