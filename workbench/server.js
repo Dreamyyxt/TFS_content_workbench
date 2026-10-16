@@ -1275,6 +1275,7 @@ const STATIC_FILES = new Set([
   '/secure-store.js',
   '/trend-policy.js',
   '/topic-workflow.js',
+  '/script-expression.js',
   '/humanizer-policy.js',
   '/shooting-plan.js',
   '/studio-motion.js',

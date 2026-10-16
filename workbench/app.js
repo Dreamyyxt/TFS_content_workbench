@@ -1398,7 +1398,7 @@ function refreshPrompt(grounding){
     '      "angle": "切入角度，一句话",',
     '      "content_form": "作品展示 / 专业讲解 / 口播 / 日常 / 剧情 / 教程 / 对比 / 图文 / vlog / 清单",',
     '      "goal": "' + ACCOUNTS.map(a=>a.goal).join(' / ') + '",',
-    '      "hook": "黄金 3 秒钩子原句",',
+    '      "hook": "适合账号的开场设计：画面、字幕或口播，不强制口播",',
     '      "keywords": ["2-4 个该条素材对应的搜索词"],',
     '      "trend_reason": "对应哪条已采集来源和日期；缺少近期依据时注明常青选题",',
     '      "priority": "high 或 normal"',
@@ -1614,6 +1614,10 @@ function renderPending(){
         (running ? '<span class="mini-tag">生成中…</span>' : '') +
       '</div>' +
       '<div class="pending-t">' + esc(m.title) + '</div>' +
+      '<details class="script-facts"'+(scriptFactsFor(m.id)?' open':'')+'><summary>本条真实细节（选填）</summary>' +
+        '<label for="scriptFacts-'+esc(m.id)+'">只填你确认过的观察、做法或原话</label>' +
+        '<textarea id="scriptFacts-'+esc(m.id)+'" data-script-facts="'+esc(m.id)+'" rows="3" maxlength="1200"'+(running?' disabled':'')+' placeholder="例如实际的款式细节、拍摄动作或本人说过的话。不要填顾客隐私。">'+esc(scriptFactsFor(m.id))+'</textarea>' +
+        '<p class="hint" data-facts-status>仅保存在本浏览器，生成时使用；不填也可以生成拍摄提案。</p></details>' +
       '<div class="pending-row">' +
         (sc ? '<span class="mini-tag">已生成脚本</span>'
             : '<span class="hint" style="margin:0">未生成</span>') +
@@ -1758,13 +1762,13 @@ async function autoFixScript(id){
 }
 
 /* 生成脚本 */
-/* 去 AI 味规则（humanizer-policy.js）。脚本没加载时静默跳过，不阻断主流程。 */
+/* 共享去 AI 味规则；新脚本另经 ScriptExpression 改写和复查。 */
 function humanRules(account, scope){
   try{ return window.HumanizerPolicy ? window.HumanizerPolicy.rules(account, scope) : ''; }
   catch(e){ return ''; }
 }
 
-/* 成品去 AI 味自检：只提示，不阻断、不改写内容。 */
+/* 历史成品的规则提示；新生成的脚本先完成独立改写再入库。 */
 function humanTone(text){
   try{ return window.HumanizerPolicy ? window.HumanizerPolicy.scan(text) : null; }
   catch(e){ return null; }
@@ -1778,47 +1782,49 @@ function humanToneCount(res){
   catch(e){ return 0; }
 }
 
-function scriptPrompt(m){
+function scriptPrompt(m, facts='', history=[]){
   return [
-    '请为下面这条素材写一支可直接开拍的短视频分镜脚本。',
-    '',
+    '请为下面这条选题写一支可直接开拍的短视频分镜脚本。',
     AccountStrategy.scriptRules(m.account),
-    '',
-    humanRules(m.account),
-    '',
-    '素材信息（如与上述账号定位冲突，以账号规则为准）：',
-    '- 账号：' + m.account + '（平台：' + (m.platform || '') + '）',
-    '- 选题：' + m.title,
-    '- 切入角度：' + (m.angle || '—'),
-    '- 内容形式：' + (m.content_form || '—'),
-    '- 目标：' + (m.goal || '—'),
-    '- 黄金 3 秒钩子：' + (m.hook || '—'),
-    '- 对应流量词：' + (m.keywords || '—'),
-    '',
+    humanRules(AccountStrategy.get(m.account).key),
+    ScriptExpression.direction(m,facts,history),
     profileBlock(),
-    '输出用 Markdown，结构如下：',
+    '直接输出 Markdown，不包裹代码块。结构如下：',
     '## 一句话脚本定位',
-    '## 黄金 3 秒钩子（原句，可直接念）',
+    '## 开场设计',
+    '用一小段说明第一镜如何吸引注意；可使用画面、现场声、字幕或口播，按账号规则选择，不要求一定念一句钩子。',
     '## 分镜表',
-    '用表格：| 时间 | 画面 / 运镜 | 口播 | 字幕 / 贴纸 |',
-    '镜头数、时间轴和总时长严格遵循上面的账号专属分镜要求，不使用统一时长。',
+    '只用这四列：| 时间 | 画面 / 运镜 | 口播 | 字幕 / 贴纸 |。每个单元格写在一行内。',
+    '镜头数、时间轴和总时长严格遵循账号配置；时间写成0–3秒这样的起止区间，从0秒开始连续。',
     '## 发布配置',
-    '- 发布标题（抖音号要埋地域词；小红书号要用用户会原样搜索的话）',
-    '- 话题标签（3-5 个精准词，不要堆砌）',
-    '- 挂载与 POI 建议',
-    '- 评论区置顶引导一句',
+    '- 发布标题、3–5个精准话题、挂载与POI建议、适合本条的评论引导（不适用时可省略引导）。',
     '## 合规提示',
-    '指出这条脚本在表述上需要注意的风险点，并给出安全替换说法。',
-    '',
-    '硬性要求：画面描述要具体到可直接执行；口播要口语化，语气符合门店档案里的品牌格调；',
-    '画面与口播要体现门店的真实信息（位置 / 交通 / 环境 / 主打款式 / 差异化卖点），不要编造门店没有的东西；',
-    '禁止出现极限词（最/第一/永久/百分百类）、医疗功效表述（消毒/杀菌/修复受损甲类）、导流信息（微信/手机号/站外平台名）、虚假宣传或贬低同行，也不得编造门店价格。'
-  ].join('\n');
+    '指出需要核实的事实或表述风险，不要在可直接念的口播中使用未经确认的内容。',
+    '画面描述具体可执行；有口播时用本账号自然说话的方式，允许留白。',
+    '禁止极限词、医疗功效表述、站外导流、虚假宣传或贬低同行；不得编造价格。'
+  ].join('\n\n');
+}
+
+const reserveScriptAccount=ScriptExpression.createQueue();
+const scriptFacts=Object.create(null);
+function scriptFactsFor(id){
+  if(Object.hasOwn(scriptFacts,id))return scriptFacts[id];
+  const value=LS.get('wj_script_facts_'+id,'');
+  return scriptFacts[id]=typeof value==='string'?value.slice(0,1200):'';
+}
+async function recentAccountScripts(account){
+  const {data,error}=await cloud.database.from('scripts').select('*').eq('account',account)
+    .order('created_at',{ascending:false}).limit(12);
+  if(error)throw Error('近期脚本读取失败，未开始生成：'+(error.message||error));
+  const merged=new Map((data||[]).map(row=>[row.id,row]));
+  S.scripts.filter(row=>row.account===account).forEach(row=>{if(!merged.has(row.id))merged.set(row.id,row);});
+  return [...merged.values()].sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).slice(0,12);
 }
 
 async function generateScript(materialId, quiet){
   const m = S.materials.find(x => x.id === materialId);
   if (!m) return null;
+  if(!S.accountSettingsLoaded){toast('账号规则尚未加载，请刷新后再生成','err');return null;}
   if (S.gen[materialId]) return null;          /* 同一素材不重复生成 */
   S.gen[materialId] = true;
   S.genRunning++;
@@ -1843,10 +1849,19 @@ async function generateScript(materialId, quiet){
   const th = $('[data-think]', holder);
   const st = $('[data-state]', holder);
   const t0 = Date.now();
+  const slot=reserveScriptAccount(m.account);
+  const facts=scriptFactsFor(m.id);
   try{
-    const text = await llmStream([
-      { role:'system', content:'你是短视频分镜编导，擅长抖音本地生活与小红书的内容节奏。输出严格使用 Markdown，分镜表必须是合法 Markdown 表格。口播必须是真人会说出来的话，不许有 AI 写作腔和广告腔。' },
-      { role:'user', content: scriptPrompt(m) }
+    st.textContent='等待同账号前一条完成';
+    await slot.wait;
+    const account=AccountStrategy.get(m.account);
+    if(!account||account.enabled===false)throw Error('该账号未启用，请先检查账号矩阵');
+    st.textContent='读取近期表达';
+    const history=await recentAccountScripts(m.account);
+    const context=scriptPrompt(m,facts,history);
+    let text = await llmStream([
+      { role:'system', content:'你是短视频分镜编导，擅长抖音本地生活与小红书的内容节奏。输出严格使用 Markdown，分镜表必须是合法 Markdown 表格。按账号规则决定是否需要口播；有口播时必须自然，不许有 AI 写作腔和广告腔。' },
+      { role:'user', content: context }
     ], (d, full, think) => {
       const sec = Math.round((Date.now() - t0) / 1000);
       if (think){
@@ -1862,13 +1877,28 @@ async function generateScript(materialId, quiet){
     });
 
     if (!text.trim()) throw new Error('模型没有返回内容，请重试');
-
+    ScriptExpression.validate(text,account);
+    let feedback='';
+    for(let attempt=0;attempt<2;attempt++){
+      st.textContent=attempt?'修正重复表达':'Humanizer 改写中';
+      th.textContent='';ta.textContent='正在改写开场、口播和字幕，保留分镜与时间轴…';
+      const edit=await llmStream([
+        {role:'system',content:'你是中文口播编辑。遵守事实边界和账号规则，只返回指定 JSON。'},
+        {role:'user',content:ScriptExpression.reviewPrompt(text,context,feedback)}
+      ],(d,full,think)=>{if(think)th.textContent=think.slice(-600);if(full)ta.textContent=full.slice(-1600);},{json:true});
+      text=ScriptExpression.applyReview(text,extractJson(edit));
+      ScriptExpression.validate(text,account);
+      feedback=ScriptExpression.issues(text,history,m.account).join('；');
+      if(!feedback)break;
+    }
+    if(feedback)throw Error('表达复查未通过，尚未保存：'+feedback);
+    st.textContent='正在保存';ta.textContent=text.slice(-1600);
     const scan = complianceScan(text);
     const riskText = scan.hits.length
       ? scan.hits.map(h => h.group + '：' + h.word).join('；')
       : '无';
     const toneText = humanToneBrief(humanTone(text));
-    const toneTail = toneText ? '；去 AI 味自检命中 ' + toneText : '；去 AI 味自检干净';
+    const toneTail = toneText ? '；去 AI 味自检命中 ' + toneText : '；Humanizer 已改写，规则检查未发现明显套话';
 
     const row = {
       material_id: m.id,
@@ -1882,7 +1912,8 @@ async function generateScript(materialId, quiet){
       ops_name: opsName()
     };
     const saved = await insertScript(row);
-    if (saved) S.scripts.unshift(saved);
+    if (!saved) throw Error('保存结果未确认，请刷新脚本库检查，避免重复生成');
+    S.scripts.unshift(saved);
     holder.remove();
     renderScripts(); renderPending(); renderBadges(); renderProgress();
 
@@ -1903,6 +1934,7 @@ async function generateScript(materialId, quiet){
     toast('「' + m.title + '」生成失败：' + msg, 'err');
     return { ok:false, error:msg, title:m.title };
   }finally{
+    slot.release();
     delete S.gen[materialId];
     S.genRunning = Math.max(0, S.genRunning - 1);
     renderPending();
@@ -1912,7 +1944,7 @@ async function generateScript(materialId, quiet){
   }
 }
 
-/* 并发批量生成：生成脚本是「等模型出字」的活，串行排队的等待时间被白白浪费 */
+/* 跨账号最多三条并行；同账号等待上一条保存，再读取近期表达。 */
 const GEN_CONCURRENCY = 3;
 
 async function generateAll(){
@@ -3209,6 +3241,13 @@ function bind(){
     if(e.target.closest('#btnClearBasket'))clearSelection();
   });
 
+  $('#pendingList').addEventListener('input',e=>{
+    const input=e.target.closest('[data-script-facts]');if(!input)return;
+    scriptFacts[input.dataset.scriptFacts]=input.value.slice(0,1200);
+    const status=input.closest('.script-facts').querySelector('[data-facts-status]');
+    try{localStorage.setItem('wj_script_facts_'+input.dataset.scriptFacts,JSON.stringify(scriptFacts[input.dataset.scriptFacts]));status.textContent='已保存在本浏览器，生成时使用；不会同步到其他设备。';}
+    catch(err){status.textContent='浏览器未能保存；本次生成仍可使用，刷新后会丢失。';}
+  });
   $('#pendingList').addEventListener('click', e => {
     const g = e.target.closest('[data-gen]');
     if (g){ generateScript(Number(g.dataset.gen)); return; }
