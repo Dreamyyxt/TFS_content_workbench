@@ -44,9 +44,16 @@ const TrendPolicy=require('./trend-policy');
 const redfoxCache=TrendPolicy.createCache();
 const crypto=require('node:crypto');
 const JY_LOCAL = process.env.JY_LOCAL === '1';
+/* 远程访问（Tailscale / 自建域名）授权的主机名，逗号分隔；判定规则见 access-policy.js。
+   只放宽「哪个来源允许连本机服务」，不改变「服务只听回环」这条底线 —— 远程流量必须
+   经由同一台机器上的反向代理进来。 */
+const {createAccessPolicy} = require('./access-policy');
+const access = createAccessPolicy(process.env.JY_TRUSTED_HOSTS);
+const JY_TRUSTED_HOSTS = access.extra;
 const jianyingAPI = JY_LOCAL ? require('./jianying-api').createJianyingAPI({
   dir: process.env.JY_DATA_DIR || path.join(ROOT, '../.jianying-data'),
-  userToken: process.env.JY_USER_TOKEN, workerToken: process.env.JY_WORKER_TOKEN, local:true, volc: require('./volc-video').createVolcClient()
+  userToken: process.env.JY_USER_TOKEN, workerToken: process.env.JY_WORKER_TOKEN, local:true, volc: require('./volc-video').createVolcClient(),
+  trustedHosts: JY_TRUSTED_HOSTS
 }) : null;
 const PORT = Number(process.env.PORT || 3000);
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
@@ -1305,6 +1312,20 @@ function serveStatic(req, res, pathname) {
     res.writeHead(403);
     return res.end('forbidden');
   }
+  /* 只有本机制作服务出具的页面带这个标记。前端据此判断「页面与制作服务同源」，
+     于是远程（自建域名 / 局域网）访问时自动改用同源接口；线上网页没有标记，仍回落到 127.0.0.1:4191。 */
+  if (rel === '/index.html' && JY_LOCAL) {
+    fs.readFile(file, 'utf8', (err, html) => {
+      if (err) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        return res.end('404');
+      }
+      const body = Buffer.from(html.replace('</head>', '<meta name="wj-local-service" content="1">\n</head>'), 'utf8');
+      res.writeHead(200, { 'Content-Type': MIME['.html'], 'Content-Length': body.length, 'Cache-Control': 'no-cache' });
+      res.end(body);
+    });
+    return;
+  }
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -1330,7 +1351,11 @@ const server = http.createServer(async (req, res) => {
   if (jianyingAPI && await jianyingAPI(req, res, new URL(req.url, 'http://localhost'))) return;
 
   if (JY_LOCAL && pathname.startsWith('/.cloud/')) {
-    if (req.headers.origin && req.headers.origin !== 'http://' + req.headers.host) {
+    /* 同源即可（忽略 http / https 差异：远程走 HTTPS 域名时 origin 与 Host 主机名相同）；
+       反代若改写了 Host，则靠显式授权的主机名兜底。跨站页面仍一律 403。 */
+    const originHost = access.hostOf(req.headers.origin);
+    const requestHost = String(req.headers.host || '').split(':')[0].toLowerCase();
+    if (req.headers.origin && originHost !== requestHost && !access.trustedHost(originHost)) {
       res.writeHead(403); return res.end();
     }
     const headers = {...req.headers, host:'nail-content-workbench.app.workbuddy.host', origin:'https://nail-content-workbench.app.workbuddy.host'};

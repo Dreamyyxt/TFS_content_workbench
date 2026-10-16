@@ -9,8 +9,11 @@
 /* ---------------------------------------------------------------------
    1. 云服务公开配置（来自云服务开通结果 publicConfig，非敏感）
    --------------------------------------------------------------------- */
+/* 页面若由本机制作服务出具（含局域网 / 自建域名远程访问），云端接口也走同源 /.cloud 代理；
+   否则（线上网页、本地 file://）直连线上工作台。标记由本机服务注入 <head>。 */
+const SERVED_BY_LOCAL_SERVICE = !!document.querySelector('meta[name="wj-local-service"]');
 const PUBLIC_CONFIG = {
-  endpoint: ['127.0.0.1','localhost'].includes(location.hostname) && location.port === '4191' ? location.origin + '/.cloud' : 'https://nail-content-workbench.app.workbuddy.host',
+  endpoint: SERVED_BY_LOCAL_SERVICE ? location.origin + '/.cloud' : 'https://nail-content-workbench.app.workbuddy.host',
   oauthRelayBaseUrl: 'https://www.workbuddy.cn/v2/as/genie-baas/oauth',
   publishableKey: 'wbpk_OVXOIXh914a31yrMdLVAOD_vVWHCEtJ7W8GiGLp4CP8kIVt3PSSe78C'
 };

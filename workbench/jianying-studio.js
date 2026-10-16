@@ -1,6 +1,10 @@
 /* Production UI: Jianying edits real media; Volcengine generates from confirmed scripts. */
 (() => {
-  const $=id=>document.getElementById(id), base='http://127.0.0.1:4191/api/jianying/';
+  const $=id=>document.getElementById(id);
+  /* 制作服务地址：页面由本机服务出具（含局域网 / 自建域名等远程访问）→ 同源；
+     其余情况（线上网页、本地直接开 file://）→ 这台电脑的回环地址。标记由本机服务注入 <head>。 */
+  const servedByLocalService=!!document.querySelector('meta[name="wj-local-service"]');
+  const base=(servedByLocalService?location.origin:'http://127.0.0.1:4191')+'/api/jianying/';
   let musicAsset=null,serviceReady=false,latestJobs=[],jobFilter='all',jobQuery='';
   let token='',assets=[],source={},busy=false,mode='edit',requestId=null,jobsSignature='',refreshing=false,generation={ready:false},device={online:false};
   const thumbs=new Map(),outputs=new Map();

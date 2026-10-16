@@ -242,7 +242,8 @@
       <p id="jyStatus" class="video-connection" role="status">正在连接本机制作服务…</p>
       <details class="video-guide" id="jyStartGuide">
         <summary>换电脑？先启动本机制作服务（点此复制启动脚本）</summary>
-        <p class="hint">「视频制作」连的是<strong>当前这台电脑</strong>的 <code>127.0.0.1:4191</code> 制作服务，不经过线上。换电脑后先在那台电脑把服务启动起来，再点「连接制作服务」。前提：那台电脑已有工作台文件夹（含 <code>workbench/</code>、<code>scripts/</code>、<code>start-jianying.cjs</code>）并已安装 Node.js。</p>
+        <p class="hint">「视频制作」连的是<strong>提供这个页面的那台电脑</strong>的制作服务（<code>127.0.0.1:4191</code>），不经过线上。换电脑后先在那台电脑把服务启动起来，再点「连接制作服务」。前提：那台电脑已有工作台文件夹（含 <code>workbench/</code>、<code>scripts/</code>、<code>start-jianying.cjs</code>）并已安装 Node.js。</p>
+        <p class="hint">远程访问：页面若是从 Mac 的 Tailscale 域名打开的（地址栏不是 <code>app.workbuddy.host</code>），会自动连同一台 Mac，无需额外设置——手机、别的电脑都能用它剪辑与生成。设备需已加入同一个 Tailscale 网络。</p>
         <pre class="video-guide-code"><code id="jyStartCode">#!/bin/zsh
 cd "$(dirname "$0")/workbench" || exit 1
 node start-jianying.cjs</code></pre>

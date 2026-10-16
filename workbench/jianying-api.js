@@ -6,12 +6,15 @@ const {pipeline} = require('node:stream/promises');
 const {Transform} = require('node:stream');
 const {buildGenerationPrompt}=require('./volc-video');
 const {validate:validateEditPlan}=require('./edit-plan');
+const {createAccessPolicy}=require('./access-policy');
 const execFile=require('node:util').promisify(require('node:child_process').execFile);
 const WEB_ORIGIN = 'https://nail-content-workbench.app.workbuddy.host';
 
-function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs = 120000, volc = null, generationInterval = 5000}) {
+function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs = 120000, volc = null, generationInterval = 5000, trustedHosts = []}) {
   dir = path.resolve(dir);
   if (dir === __dirname || dir.startsWith(__dirname + path.sep)) throw Error('草稿数据不能位于静态目录内');
+  /* 谁算「可信来源」：本机回环 + 显式授权的主机名（远程访问域名）。判定规则见 access-policy.js */
+  const access = createAccessPolicy(trustedHosts);
   let state, pumping=false;
   async function pump() {
     if (!volc || pumping) return;
@@ -96,8 +99,10 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
     try {
       const route = url.pathname.slice('/api/jianying/'.length);
       const origin = req.headers.origin;
-      const localOrigin = 'http://' + req.headers.host;
-      const knownOrigin = origin === WEB_ORIGIN || (['localhost','127.0.0.1'].includes(urlHost(req)) && origin === localOrigin);
+      const requestHost = urlHost(req).toLowerCase();
+      /* 允许的调用方：① 已发布的线上工作台 ② 与本次请求同源的页面（本机 / 局域网 / 远程域名反代都走这条）
+         ③ 显式授权的主机名（反代改写了 Host 时靠它兜底）。其余网页一律 403。 */
+      const knownOrigin = access.knownOrigin(origin, requestHost, WEB_ORIGIN);
       if (origin && !knownOrigin) fail(403, '不允许此网页连接剪映');
       if (origin && knownOrigin && local) {
         res.setHeader('Access-Control-Allow-Origin', origin);
@@ -108,7 +113,7 @@ function createJianyingAPI({dir, userToken, workerToken, local = false, leaseMs 
       }
       if (req.method === 'OPTIONS') {res.writeHead(204);res.end();return true;}
       if (route === 'session' && req.method === 'GET') {
-        if (!local || !['localhost','127.0.0.1'].includes(urlHost(req)) || req.headers['x-jianying-studio'] !== '1') fail(403,'仅限本机剪映连接器');
+        if (!local || !access.trustedHost(requestHost) || req.headers['x-jianying-studio'] !== '1') fail(403,'仅限本机或已授权设备连接剪映');
         if (!userToken) fail(503, '剪映连接器未配置');
         send(res,200,{token:userToken});return true;
       }
