@@ -279,12 +279,12 @@ function ageBucket(days) {
 const REF_KEYS = { d180: 1, yoy: 1 };
 
 /* 返回 { ok, bucket, date, days, why } */
-function judge(title, snippet, domain) {
+function judge(title, snippet, domain, topics=[]) {
   const text = String(title || '') + ' ' + String(snippet || '');
   const d = String(domain || '');
 
   if (BAD_DOMAIN_RE.test(d) || BAD_TITLE_RE.test(String(title || ''))) return { ok: false, why: '非内容页' };
-  if (!NAIL_RE.test(text)) return { ok: false, why: '与美甲无关' };
+  if (!NAIL_RE.test(text) && !topics.some(t=>text.toLowerCase().includes(t.toLowerCase()))) return { ok: false, why: '与美甲无关' };
 
   const pub = parsePubDate(text);
   if (!pub) {
@@ -1073,11 +1073,13 @@ async function collectRedfox(key, opts, progress = () => {}) {
    六、聚合采集
    ========================================================================= */
 
-async function collectTrend() {
+async function collectTrend(opts={}) {
+  const topics=TrendPolicy.normalizeTopics(opts.topics||[]);
+  const plan=TrendPolicy.topicQueries(topics).concat(QUERY_PLAN,seasonQueries());
   const fetchedAt = new Date();
   const [hot, search, proDy, proXhsRes] = await Promise.all([
     douyinHot(),
-    searchAll(QUERY_PLAN.concat(seasonQueries())),
+    searchAll(plan),
     proDouyin(),
     proXhs(),
   ]);
@@ -1086,7 +1088,7 @@ async function collectTrend() {
     douyin: hot.list.length,
     web: 0,
     dropped: 0,
-    queries: QUERY_PLAN.length,
+    queries: plan.length,
     engines: search.enginesUsed,
     pro: {
       douyin: proDy.on ? (proDy.items.length ? 'ok' : 'error') : 'off',
@@ -1101,11 +1103,12 @@ async function collectTrend() {
 
   /* --- 专业源优先：有真实互动数据的排最前面，且直接标记为「平台实时」 --- */
   const sources = [];
-  const seen = new Set();
+  const seen = new Map();
   const push = (s) => {
     const key = String(s.title).replace(/\s+/g, '').slice(0, 40);
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
+    if(!key)return false;
+    if(seen.has(key)){const existing=seen.get(key);existing.topics=[...new Set([...(existing.topics||[]),...(s.topics||[])])];return false;}
+    seen.set(key,s);
     sources.push(s);
     return true;
   };
@@ -1128,7 +1131,7 @@ async function collectTrend() {
   const kept = [];
   stats.dropWhy = {};
   for (const r of search.results) {
-    const j = judge(r.title, r.snippet, r.domain);
+    const j = judge(r.title, r.snippet, r.domain, topics);
     if (!j.ok) {
       stats.dropped++;
       stats.dropWhy[j.why] = (stats.dropWhy[j.why] || 0) + 1;
@@ -1148,6 +1151,7 @@ async function collectTrend() {
       days: j.days,
       window: j.bucket.label,
       tag: (r.plan && r.plan.tag) || '',
+      topics: r.plan?.topic ? [r.plan.topic] : [],
       grade: j.bucket.key,
       _score: j.bucket.score + (platform === '小红书' || platform === '抖音' ? 1 : 0),
     });
@@ -1176,6 +1180,7 @@ async function collectTrend() {
     ok,
     error: ok ? '' : '采集没有拿到任何数据（云端可能无法访问公网）',
     fetched_at: fetchedAt.toISOString(),
+    topics,
     scope: '抖音实时热榜 + 近一年内的美甲公开内容（按真实发布日期分档，超一年已剔除）',
     douyin: hot.list,
     douyin_src: hot.src,
@@ -1269,6 +1274,7 @@ const STATIC_FILES = new Set([
   '/edit-plan.js',
   '/secure-store.js',
   '/trend-policy.js',
+  '/topic-workflow.js',
   '/humanizer-policy.js',
   '/shooting-plan.js',
   '/studio-motion.js',
@@ -1352,7 +1358,7 @@ const server = http.createServer(async (req, res) => {
 
   if (pathname === '/api/trend/collect') {
     try {
-      return sendJson(res, 200, await collectTrend());
+      return sendJson(res, 200, await collectTrend({topics:new URL(req.url,'http://localhost').searchParams.getAll('topic')}));
     } catch (e) {
       return sendJson(res, 200, {
         ok: false,
