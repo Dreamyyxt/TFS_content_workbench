@@ -71,9 +71,17 @@
   「全局设置 → 草稿设置 → 草稿自动备份」（纯 App 驱动、需登录，脚本触发不了）；草稿引用本地绝对路径素材，
   **异地还原是否完整未实测**。草稿真目录 `~/Movies/JianyingPro/User Data/Projects/com.lveditor.draft`（`cloud_draft_sync` 本机 false）。
 
-### 运维硬约束
-- **本机服务只能由用户双击启动**：`nohup … &` 在 Bash 结束时被沙箱回收；`open .command` 子进程同样回收；
-  `osascript … do script` 报「权限违例 (-10004)」→ 只做「停旧进程 + 让用户双击」。
+### 服务启停（2026-10-16 起改为 launchd 登录自启）
+- 自启 = `~/Library/LaunchAgents/com.wujiseason.jianying-connector.plist`，由 `安装开机自启.command`
+  **按实际路径生成**（不把本机路径写死进仓库）；跑 `node workbench/start-jianying.cjs`；`RunAtLoad` +
+  `KeepAlive{SuccessfulExit:false}` + `ThrottleInterval 10`；日志 `logs/jianying-connector{,.error}.log`（已 gitignore）。
+  配套 `卸载开机自启.command` / `重启制作服务.command`（**改完剪辑代码用它**，比关终端再双击省事）。
+- ⚠️ **工具进程无法自己加载它**：`launchctl bootstrap` 在 `gui/501` 与 `user/501` 两种域、**即使关掉沙箱**都返回
+  `5: Input/output error`（`launchctl print gui/501` 可读、`bootstrap` 写不进）→ 该进程不在用户图形会话内。
+  **必须由用户双击 `.command`**（Terminal 在 Aqua 会话里）。
+  另：`nohup … &` 被沙箱回收、`open .command` 子进程被回收、`osascript … do script` 报「权限违例 (-10004)」。
+- **自启要求已登录**：Mac 重启若停在登录界面（未开自动登录），服务不会起 → 需开「系统设置 → 用户与群组 → 自动登录」。
+- ⚠️ 装自启前必须先停掉手工实例，否则两边抢 4191 → 崩溃循环（`ThrottleInterval` 10s 兜底）。安装脚本已内置该检查与确认。
 - 判端口 `lsof -nP -iTCP -sTCP:LISTEN`（`ps` 被拒）；沙箱内 curl 连 127.0.0.1 需 `--noproxy '*'`。
 - ⚠️ **不要删除当前会话的 cwd**（10-16 把空壳目录移入废纸篓 → Bash 工具整体失效）。
 - **改完剪辑代码必须重启服务**：①浏览器侧文件从**线上**加载，不发布模型不输出视觉字段；②`jianying-api.js:8`

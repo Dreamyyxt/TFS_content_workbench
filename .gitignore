@@ -15,3 +15,6 @@ __pycache__/
 
 # 部署标记：localDir 写死本机绝对路径，入库后跨设备克隆会误导
 .wbapp_*.genie*
+
+# 服务日志（launchd 自启写入，本机专属）
+logs/
