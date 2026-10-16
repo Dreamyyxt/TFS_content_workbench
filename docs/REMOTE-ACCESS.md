@@ -26,32 +26,42 @@
 1. 装 Tailscale：`brew install --cask tailscale`（或从 App Store 装）。
 2. 打开 Tailscale，登录（Google / Apple / GitHub / Microsoft 任一账号皆可），
    首次会要求批准网络扩展：**系统设置 → 隐私与安全性** 里点「允许」。
-3. 让远程流量能被转发进来（在终端执行一次；`<机器名>` 用第 4 步里的域名）：
+3. **开启 tailnet 的 Serve 开关**（免费，一次性）。Tailscale 默认不允许把本机服务共享给
+   tailnet，必须先在后台打开：`login.tailscale.com` → **Settings → 开启 Serve / HTTPS
+   Certificates**。若直接做第 4 步，报 `Serve is not enabled on your tailnet` 时它会给出
+   一个一步开启的链接，点开登录即可。
+
+4. **双击项目根目录的 `开启远程访问.command`**（推荐）。它一次做完三件事：
+
+   1. 把本机 Tailscale 域名写进授权文件 `~/.wujiseason/remote-hosts`；
+   2. 执行 `tailscale serve --bg --https=443 http://127.0.0.1:4191`，把 HTTPS 域名转发到本机服务；
+   3. 重启制作服务，让它读到授权域名，最后打印远程网址。
+
+   等价的命令行版本：
 
    ```sh
-   /Applications/Tailscale.app/Contents/MacOS/Tailscale serve --bg --https=443 http://127.0.0.1:4191
+   TS=/Applications/Tailscale.app/Contents/MacOS/Tailscale
+   mkdir -p ~/.wujiseason
+   "$TS" status --json | /usr/bin/python3 -c 'import json,sys;print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))' > ~/.wujiseason/remote-hosts
+   "$TS" serve --bg --https=443 http://127.0.0.1:4191
+   launchctl kickstart -k gui/$(id -u)/com.wujiseason.jianying-connector
    ```
 
-   查看/关闭：
+   查看 / 关闭：
 
    ```sh
-   …/Tailscale serve status
-   …/Tailscale serve --https=443 off
+   "$TS" serve status     # 查看当前配置
+   "$TS" serve reset      # 关闭远程入口（= 双击「关闭远程访问.command」）
    ```
 
-4. 拿到域名：
+   启动日志（`logs/jianying-connector.log`）里应出现
+   `已授权远程访问： https://<机器名>.<tailnet>.ts.net/`。
 
-   ```sh
-   …/Tailscale status --json | grep DNSName      # 形如 nail-mac.tailxxxx.ts.net
-   ```
-
-5. 重启制作服务，让它读到这个域名（**必须做，否则远程会 403**）：
-
-   - 双击 `重启制作服务.command`，或
-   - 服务由 launchd 托管时：`launchctl kickstart -k gui/501/com.wujiseason.jianying-connector`
-
-   启动日志里应出现 `已授权远程访问： https://<机器名>.<tailnet>.ts.net/`。
-   （`start-jianying.cjs` 会自动读取本机 Tailscale 域名；也可用环境变量 `JY_TRUSTED_HOSTS` 手工指定。）
+> ⚠️ **为什么授权域名要落盘成文件**：`launchd` 的极简环境里**调不动 Tailscale CLI**
+> （报 `The Tailscale GUI failed to start: Tailscale.CLIError error 3`），运行时自动探测
+> 必然落空，远程就会 403。所以 `start-jianying.cjs` 按「环境变量 `JY_TRUSTED_HOSTS` →
+> CLI 探测 → 文件 `~/.wujiseason/remote-hosts`」三个来源合并；文件由
+> `开启远程访问.command` 在图形环境里写入。也可以让脚本双击运行，它自带这套逻辑。
 
 ## 二、手机 / 其他电脑（每台一次）
 
@@ -70,10 +80,12 @@
 
 | 现象 | 原因 / 处理 |
 |---|---|
-| 页面能开，「连接制作服务」失败 / 403 | 服务没读到域名 → 做上面第 5 步重启服务 |
+| 脚本报 `Serve is not enabled on your tailnet` | tailnet 还没开启 Serve → 点它给出的链接开启一次（见第一节第 3 步） |
+| 页面能开，「连接制作服务」失败 / 403 | 服务没读到授权域名 → 双击「开启远程访问.command」（写文件 + 重启服务） |
+| 日志里是「未检测到远程访问域名」 | 授权文件缺失 → 双击「开启远程访问.command」；确认 `~/.wujiseason/remote-hosts` 里有域名 |
 | 域名打不开 | 该设备没登录 Tailscale，或没加入同一 tailnet |
-| Tailscale 域名变了（重装等） | 重启服务即可（域名是自动读取的） |
-| 想临时关掉远程 | `…/Tailscale serve --https=443 off` |
+| Tailscale 域名变了（重装等） | 双击「开启远程访问.command」重写授权文件并重启服务 |
+| 想临时关掉远程 | 双击「关闭远程访问.command」（或 `…/Tailscale serve reset`） |
 | 手机开的是线上网页（`app.workbuddy.host`） | 那是线上版本，只会连**本机**回环 → 手机上剪不了；请用 Tailscale 域名 |
 
 ## 五、安全边界（改代码时别越线）
@@ -82,6 +94,8 @@
 - 授权名单只放宽两处：`jianying-api.js` 的「哪个网页能连」与「谁能领 `/session` token」；
   其余接口照旧要 `Bearer <token>`，token 每次启动随机生成、只发给可信来源。
 - 判定逻辑集中在 `workbench/access-policy.js`（有单测 `tests/remote-access.test.cjs`）。
-- 想换成自己的域名（如 `nas.no1dea.com`）：把域名填进 `JY_TRUSTED_HOSTS`，
-  再用 Caddy/nginx 在 Mac 上终止 TLS 并反代到 `127.0.0.1:4191` 即可；
-  **反代必须同时改写 `Host` 与 `Origin`，或把域名加进 `JY_TRUSTED_HOSTS`**。
+- 授权域名的三个来源见 `start-jianying.cjs`：环境变量 `JY_TRUSTED_HOSTS` →
+  Tailscale CLI 探测 → 文件 `~/.wujiseason/remote-hosts`（可用 `JY_TRUSTED_HOSTS_FILE` 改路径）。
+- 想换成自己的域名（如 `mac.no1dea.com`）：把域名加进 `~/.wujiseason/remote-hosts`（或
+  `JY_TRUSTED_HOSTS`），再用 Caddy/nginx 在 Mac 上终止 TLS 并反代到 `127.0.0.1:4191`；
+  **反代必须同时改写 `Host` 与 `Origin`，否则会被挡**。

@@ -16,9 +16,11 @@ if [ -z "$TS" ]; then
 fi
 
 print -r -- "正在关闭远程入口…"
-"$TS" serve --https=443 off 2>&1
+"$TS" serve reset 2>&1
+rm -f "$HOME/.wujiseason/remote-hosts"
 print -r -- ""
 print -r -- "✔ 远程入口已关闭（本机 http://127.0.0.1:4191 不受影响）。"
+print -r -- "  提示：已授权域名名单在下一次制作服务重启后自动清空。"
 print -r -- "  再次开启：双击「开启远程访问.command」"
 print -r -- ""
 read -r "?按回车关闭窗口…"
