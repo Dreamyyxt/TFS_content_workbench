@@ -798,8 +798,8 @@ function renderTrend(){
 
   /* 整体伸缩：状态记在 localStorage */
   const body = $('#trendBody'), fold = $('#btnTrendFold');
-  if (body) body.classList.toggle('is-folded', !!S.trendFolded);
-  if (fold) fold.textContent = S.trendFolded ? '展开' : '收起';
+  if (body){body.classList.toggle('is-folded', !!S.trendFolded);body.hidden=!!S.trendFolded;}
+  if (fold){fold.textContent=S.trendFolded?'展开结果 ＋':'收起结果 −';fold.setAttribute('aria-expanded',String(!S.trendFolded));}
 
   if (!t){
     badge.className = 'src-badge is-none'; badge.textContent = '尚未同步';
@@ -998,6 +998,8 @@ async function collectWebTrend(){
   if ($('#btnAiTrend')) $('#btnAiTrend').disabled = true;
 
   const box = $('#trendStream'), thinkEl = $('#trendStreamThink');
+  $('#discoverProgress').append(box);
+  S.trendFolded=false;LS.set('wj_trend_folded',false);renderTrend();
   box.hidden = false;
   thinkEl.hidden = true; thinkEl.textContent = '';
   $('#trendStreamText').textContent = '';
@@ -1200,7 +1202,7 @@ function renderMaterials(){
   const filtered=!!S.search.trim()||S.filter!=='全部'||S.selectedOnly||S.materialForm!=='全部'||S.materialStatus!=='all';
   $('#materialClear').hidden=!filtered;
   $('#materialResultCount').textContent='显示 '+list.length+' / '+pool.length+' 个 · '+(S.onlyLatest?'最新一批':'全部批次');
-  $('#materialEmpty').innerHTML=filtered?'<strong>没有匹配的选题</strong><p>试试其他关键词、账号、形式或脚本状态。</p><button class="btn btn-ghost btn-sm" data-clear-material-filters>清除筛选</button>':'<strong>这里还没有选题</strong><p>可在上方实时采集风向，或载入趋势底稿。</p>';
+  $('#materialEmpty').innerHTML=filtered?'<strong>没有匹配的选题</strong><p>试试其他关键词、账号、形式或脚本状态。</p><button class="btn btn-ghost btn-sm" data-clear-material-filters>清除筛选</button>':'<strong>这里还没有选题</strong><p>先获取最新风向，再按账号生成主题内容。</p>';
   if (!list.length){
     grid.innerHTML = '';
     $('#materialEmpty').hidden = false;
@@ -1225,9 +1227,9 @@ function renderMaterials(){
         (kws.length?'<div class="card-kw">'+kws.map(k=>'<span>'+esc(k.trim())+'</span>').join('')+'</div>':'')+
         (!m.angle&&!m.goal&&!m.trend_reason&&!kws.length?'<p class="hint">暂无补充思路。</p>':'')+
         '</div></details>'+
-      '<div class="topic-script-state">'+(sc?'<span class="mini-tag">已有脚本</span>':'<span>待写脚本</span>')+'</div>'+
+      '<div class="topic-script-state"><span>'+(sc?'已有脚本':'待写脚本')+'</span>'+(sc?'<button class="text-button" data-open-script="'+esc(sc.id)+'">查看脚本 ↗</button>':'')+'</div>'+
       '<div class="card-foot"><button type="button" class="pick" aria-pressed="'+!!m.selected+'" aria-disabled="'+(clearingSelection||selectionWrites.has(m.id))+'" data-pick="'+esc(m.id)+'">'+(selectionWrites.has(m.id)?'保存中…':m.selected?'✓ 已加入待制作':'+ 加入待制作')+'</button>'+
-        (sc?'<button class="text-button" data-open-script="'+esc(sc.id)+'">查看脚本 ↗</button>':'')+'</div></article>';
+        '</div></article>';
   }).join('');
   window.StudioMotion?.settle(grid,previous,'data-material-id');
   restorePick();
@@ -1430,6 +1432,7 @@ async function aiRefreshTrend(){
   $('#btnSeed').disabled = true;
   if ($('#btnAiTrend')) $('#btnAiTrend').disabled = true;
   const box = $('#trendStream');
+  $('#createProgress').append(box);
   box.hidden = false;
   const thinkEl = $('#trendStreamThink');
   thinkEl.hidden = true; thinkEl.textContent = '';
@@ -3089,7 +3092,7 @@ function bind(){
   try{ bindSecureUI(); }
   catch(err){ console.warn('[工作台] 数据源弹窗事件绑定失败', err); }
 
-  /* 风向面板整体收起 / 展开 */
+  /* 只收起 / 展开本期结果，关注主题与采集入口始终可见。 */
   if ($('#btnTrendFold')) $('#btnTrendFold').addEventListener('click', () => {
     S.trendFolded = !S.trendFolded;
     LS.set('wj_trend_folded', S.trendFolded);
