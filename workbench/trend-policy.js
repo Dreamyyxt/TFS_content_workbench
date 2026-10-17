@@ -56,15 +56,43 @@
     push((SEASON_WORDS[s.season]||[]));
     return [...set].slice(0,max);
   }
-  /* 实际送去搜索的关键词：账号词优先，再补时令词。
-     每次采集的关键词数 = 红狐调用量（每词一次），所以两头都要设上限：
-     账号词最多 max-3 个，且至少留 3 个位置给时令词 —— 否则账号词一多，时令注入就被挤没了。
-     默认 max=11 → 账号词 ≤8 + 时令词 ≤3，一次采集约 9 个词。 */
-  function searchKeywords(accounts,now,max=11){
-    const account=keywords(accounts).slice(0,Math.max(1,max-3));
-    const set=new Set(account);
-    for(const w of seasonWords(now,Math.min(3,max-account.length)))set.add(w);
+  // User topics are search inputs, never proof of popularity.
+  function normalizeTopics(value){
+    const parts=Array.isArray(value)?value:String(value||'').split(/[,，、;；\n]/);
+    const result=[],seen=new Set();
+    for(const raw of parts){
+      if(typeof raw!=='string')throw Error('关注主题必须是文字');
+      const word=raw.normalize('NFKC').trim().replace(/^#+/,'').trim();
+      if(!word)continue;
+      if(word.length>40 || /[\u0000-\u001f\u007f]/.test(word))throw Error('每个关注主题请控制在40字以内');
+      const key=word.toLocaleLowerCase();if(seen.has(key))continue;
+      seen.add(key);result.push(word);
+    }
+    if(result.length>8)throw Error('最多关注8个主题，请先移除不需要的主题');
+    return result;
+  }
+  function topicQueries(value){return normalizeTopics(value).map(topic=>({q:topic+' 美甲',win:7,plat:'关注主题',tag:'关注 · '+topic,topic}));}
+  function searchKeywords(accounts,now,max=11,topics=[]){
+    const custom=normalizeTopics(topics),season=seasonWords(now,3);
+    const set=new Set(custom);
+    const room=Math.max(0,max-season.length-set.size);
+    for(const word of keywords(accounts)){if(set.size>=custom.length+room)break;set.add(word);}
+    for(const word of season)if(set.size<max)set.add(word);
     return [...set].slice(0,max);
   }
-  return {published,filter,keywords,createCache,seasons,seasonWords,searchKeywords};
+  function topicSignals(topics,sources){
+    return normalizeTopics(topics).map(topic=>{
+      const matches=(sources||[]).filter(s=>(s.topics||[]).some(t=>String(t).toLowerCase()===topic.toLowerCase()));
+      const recent=matches.filter(s=>!s.reference && s.days!=null && s.days>=0 && s.days<=7);
+      return {topic,recent:new Set(recent.map(s=>s.url||s.title)).size,total:new Set(matches.map(s=>s.url||s.title)).size};
+    });
+  }
+  function digest(corpus){
+    const sources=corpus.sources||[];
+    const hot=(corpus.douyin||[]).filter(x=>x.related).map(x=>x.word);
+    const rf=corpus.redfox||{};
+    const words=[...hot,...(rf.hot||[]).map(x=>x.word),...(rf.xhs_hot||[]).map(x=>x.word)];
+    return {summary:'已采集 '+sources.length+' 条公开来源和 '+(corpus.douyin||[]).length+' 条热榜词。可先查看来源，再按账号生成选题。',keywords:[...new Set(words)].slice(0,20),sections:[{key:'sources',title:'近期内容样本',points:sources.slice(0,8).map((s,i)=>({text:s.title,src:[i+1]}))}]};
+  }
+  return {published,filter,keywords,createCache,seasons,seasonWords,searchKeywords,normalizeTopics,topicQueries,topicSignals,digest};
 });
