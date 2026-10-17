@@ -13,9 +13,12 @@
      服务端只在这次调用里用，不落盘、不写日志。没配就不带这个头，回落到本机原有配置
      （ARK_API_KEY 环境变量 / ~/.workbuddy/volc_mediakit.key），所以老用法不受影响。 */
   const arkKey=()=>{try{return (window.SecureStore && window.SecureStore.getArkKey && window.SecureStore.getArkKey()) || '';}catch(e){return '';}};
+  /* 上传超时：远程访问（Tailscale 中继 / 公网）可能只有几十 KB/s，固定 2 分钟必然失败。
+     按 10ms/KB 估算（≈100KB/s 仍有约 10 倍余量），下限 2 分钟、上限 30 分钟。 */
+  const uploadTimeout=file=>Math.min(Math.max(120000,Math.round(file.size/1024*10)),1800000);
   async function api(route,options={}){
-    const ark=arkKey();
-    const r=await fetch(base+route,{...options,headers:{Authorization:'Bearer '+token,...(ark?{'X-Ark-Key':ark}:{}),...options.headers},signal:AbortSignal.timeout(120000)});
+    const ark=arkKey(),{timeout=120000,...rest}=options;
+    const r=await fetch(base+route,{...rest,headers:{Authorization:'Bearer '+token,...(ark?{'X-Ark-Key':ark}:{}),...rest.headers},signal:AbortSignal.timeout(timeout)});
     if(!r.ok){const e=await r.json().catch(()=>({}));throw Error(e.error || '请求失败 '+r.status);}return r;
   }
   const post=(route,body)=>api(route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
@@ -120,10 +123,10 @@
     const gen=mode==='generate',max=gen?9:30,valid=/\.(jpg|jpeg|png|webp|mp4|mov|m4v)$/i;
     if(files.length+assets.length>max || files.some(f=>!valid.test(f.name)||f.size>(gen?30:100)*1024*1024 || gen&&!/\.(jpg|jpeg|png|webp)$/i.test(f.name))){message(gen?'生成模式最多9张参考照片，单张小于30MB。':'最多30个照片或视频，单个不超过100MB。',true);return;}
     lock(true);
-    try{for(const file of files){message('正在上传 '+file.name+'…');const asset=await(await api('assets?name='+encodeURIComponent(file.name),{method:'POST',body:file})).json();assets.push(asset);if(asset.type!=='audio')thumbs.set(asset.id,URL.createObjectURL(file));}requestId=null;message('素材已添加，可调整顺序。');}
+    try{for(const file of files){message('正在上传 '+file.name+'…');const asset=await(await api('assets?name='+encodeURIComponent(file.name),{method:'POST',body:file,timeout:uploadTimeout(file)})).json();assets.push(asset);if(asset.type!=='audio')thumbs.set(asset.id,URL.createObjectURL(file));}requestId=null;message('素材已添加，可调整顺序。');}
     catch(e){message(e.message,true);}finally{lock(false);$('jyFiles').value='';}
   }
-  $('jyMusicFile').onchange=async e=>{const file=e.target.files[0];if(!file)return;if(!/\.(mp3|wav|m4a)$/i.test(file.name)||file.size>100*1024*1024){message('配乐需为100MB以内的音频文件',true);return;}lock(true);try{musicAsset=await(await api('assets?name='+encodeURIComponent(file.name),{method:'POST',body:file})).json();$('jyMusicName').textContent='已上传：'+file.name;$('jyMusicMode').value='upload';requestId=null;}catch(error){message(error.message,true);}finally{lock(false);}};
+  $('jyMusicFile').onchange=async e=>{const file=e.target.files[0];if(!file)return;if(!/\.(mp3|wav|m4a)$/i.test(file.name)||file.size>100*1024*1024){message('配乐需为100MB以内的音频文件',true);return;}lock(true);try{musicAsset=await(await api('assets?name='+encodeURIComponent(file.name),{method:'POST',body:file,timeout:uploadTimeout(file)})).json();$('jyMusicName').textContent='已上传：'+file.name;$('jyMusicMode').value='upload';requestId=null;}catch(error){message(error.message,true);}finally{lock(false);}};
   $('jyFiles').onchange=e=>upload([...e.target.files]);
   const drop=$('jyDropzone');drop.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();$('jyFiles').click();}};
   drop.ondragover=e=>{e.preventDefault();drop.classList.add('is-dragging');};drop.ondragleave=()=>drop.classList.remove('is-dragging');drop.ondrop=e=>{e.preventDefault();drop.classList.remove('is-dragging');upload([...e.dataTransfer.files]);};
