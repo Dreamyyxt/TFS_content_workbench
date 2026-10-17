@@ -1211,7 +1211,7 @@ function renderMaterials(){
     const sc = scriptForMaterial(m.id);
     const kws = String(m.keywords || '').split(/[,，]/).filter(Boolean);
     return '<article class="card topic-card'+(m.selected?' is-selected':'')+(sc?' has-script':'')+'" data-material-id="'+esc(m.id)+'" tabindex="-1">'+
-      '<div class="card-top"><span class="tag tag-account" data-k="'+esc(acc.key)+'">'+esc(m.account)+'</span>'+(m.content_form?'<span class="tag tag-plain">'+esc(m.content_form)+'</span>':'')+(m.priority==='high'?'<span class="tag tag-high">重点</span>':'')+'</div>'+
+      '<div class="topic-card-toolbar"><div class="card-top"><span class="tag tag-account" data-k="'+esc(acc.key)+'">'+esc(m.account)+'</span>'+(m.content_form?'<span class="tag tag-plain">'+esc(m.content_form)+'</span>':'')+(m.priority==='high'?'<span class="tag tag-high">重点</span>':'')+'</div><button type="button" class="btn-danger-ghost card-delete" data-del="'+esc(m.id)+'" aria-label="删除选题：'+esc(m.title||'未命名选题')+'">删除选题</button></div>'+
       '<h3 class="card-title">'+esc(m.title||'未命名选题')+'</h3>'+
       '<div class="topic-hook"><span>开场灵感</span><blockquote>'+esc(m.hook||'这条选题还没有填写开场。')+'</blockquote></div>'+
       '<details class="topic-details"><summary>选题思路与关键词 <span aria-hidden="true">＋</span></summary><div class="topic-details-body">'+
@@ -1219,9 +1219,9 @@ function renderMaterials(){
         (m.goal?'<div class="card-line"><b>目标</b><span>'+esc(m.goal)+'</span></div>':'')+
         (m.trend_reason?'<div class="card-reason"><b>选题理由</b>'+esc(m.trend_reason)+'</div>':'')+
         (humanToneCount(humanTone([m.title,m.hook,m.angle,m.trend_reason].join('\n')))?'<p class="hint">表达检查：'+esc(humanToneBrief(humanTone([m.title,m.hook,m.angle,m.trend_reason].join('\n'))))+'，建议发布前复核。</p>':'')+
-        (kws.length?'<div class="card-kw">'+kws.map(k=>'<span>'+esc(k.trim())+'</span>').join(''):'')+
+        (kws.length?'<div class="card-kw">'+kws.map(k=>'<span>'+esc(k.trim())+'</span>').join('')+'</div>':'')+
         (!m.angle&&!m.goal&&!m.trend_reason&&!kws.length?'<p class="hint">暂无补充思路。</p>':'')+
-        '<button class="btn-danger-ghost" data-del="'+esc(m.id)+'" title="删除该素材">删除选题</button></div></details>'+
+        '</div></details>'+
       '<div class="topic-script-state">'+(sc?'<span class="mini-tag">已有脚本</span>':'<span>待写脚本</span>')+'</div>'+
       '<div class="card-foot"><button type="button" class="pick" aria-pressed="'+!!m.selected+'" aria-disabled="'+(clearingSelection||selectionWrites.has(m.id))+'" data-pick="'+esc(m.id)+'">'+(selectionWrites.has(m.id)?'保存中…':m.selected?'✓ 已加入待制作':'+ 加入待制作')+'</button>'+
         (sc?'<button class="text-button" data-open-script="'+esc(sc.id)+'">查看脚本 ↗</button>':'')+'</div></article>';
@@ -1682,7 +1682,7 @@ function renderScripts(){
     const day=StudioWorkflow.dayKey(s.created_at);
     return '<article class="script-card script-library-card" data-script-id="' + esc(s.id) + '" tabindex="-1">' +
       '<div class="script-head"><div class="script-card-intro">' +
-        '<div class="script-card-meta"><span class="tag tag-account" data-k="'+esc(acc.key)+'">'+esc(s.account)+'</span>'+(s.duration?'<span>'+esc(s.duration)+'</span>':'')+(day?'<time datetime="'+day+'">'+Number(day.slice(5,7))+'月'+Number(day.slice(8))+'日创建</time>':'')+'</div>'+
+        '<div class="script-card-toolbar"><div class="script-card-meta"><span class="tag tag-account" data-k="'+esc(acc.key)+'">'+esc(s.account)+'</span>'+(s.duration?'<span>'+esc(s.duration)+'</span>':'')+(day?'<time datetime="'+day+'">'+Number(day.slice(5,7))+'月'+Number(day.slice(8))+'日创建</time>':'')+'</div><button type="button" class="btn-danger-ghost card-delete" data-delscript="'+esc(s.id)+'" aria-label="删除脚本：'+esc(s.title||'未命名脚本')+'">删除脚本</button></div>'+
         '<h4>'+esc(s.title||'未命名脚本')+'</h4></div>'+
         '<div class="script-state-tags"><span class="tag tag-plain">' + (scheduled ? '当前已排期' : '当前未排期') + '</span><span class="risk risk-' + (r === 'pass' ? 'ok' : r === 'block' ? 'block' : r === 'empty' ? 'empty' : 'warn') + '">' + rLabel + '</span></div>' +
       '</div>' + scriptCardPreview(s.content) +
@@ -1690,10 +1690,10 @@ function renderScripts(){
         '<button class="btn btn-ghost" data-viewscript="'+esc(s.id)+'">查看完整脚本</button>'+
         '<button class="btn btn-ghost" data-shoot-script="'+esc(s.id)+'"'+(String(s.content||'').trim()?'':' disabled title="脚本为空"')+'>拍摄模式</button>'+
         '<button class="btn btn-primary script-make-button" data-makevideo="'+esc(s.id)+'">开始制作 <span aria-hidden="true">↗</span></button>'+
-      '</div><details class="script-review"><summary>自检与管理<span>'+ (!hasContent?'等待正文':live.hits.length?'自检有 '+live.hits.length+' 处提示':toneN?'有 '+toneN+' 项表达提示':'暂无自检提示')+'</span></summary><div class="script-review-body">'+
+      '</div><details class="script-review"><summary>自检详情<span>'+ (!hasContent?'等待正文':live.hits.length?'自检有 '+live.hits.length+' 处提示':toneN?'有 '+toneN+' 项表达提示':'暂无自检提示')+'</span></summary><div class="script-review-body">'+
         '<p>自检：'+(hasContent?esc(hits):'暂无正文，尚未检查')+'</p>'+(toneN?'<p>去 AI 味：'+esc(toneBrief)+'</p>':'')+
         '<div class="script-review-actions">'+(live.hits.length?'<button class="btn btn-fix btn-sm" data-fixscript="'+esc(s.id)+'">一键替换禁用词</button>':'')+
-        '<button class="btn-danger-ghost" data-delscript="'+esc(s.id)+'">删除脚本</button></div></div></details></article>';
+        '</div></div></details></article>';
   }).join('');
   window.StudioMotion?.settle(box,previous);
 }
