@@ -2079,33 +2079,32 @@ function autoSchedule(){
   if (!items.length){ toast('没有可排期的素材，请先在素材库勾选', 'warn'); return; }
 
   const startISO = $('#schedStart').value || ymd(new Date());
-  const weeks = parseInt($('#schedWeeks').value, 10) || 2;
+  const weeks = Math.max(1, Math.min(3, parseInt($('#schedWeeks').value, 10) || 2));
   const start = parseYmd(startISO);
-  const monday = startOfWeek(start);
 
-  /* 拍摄日：每周二 / 周五 */
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startISO) || !Number.isFinite(start.getTime()) || ymd(start)!==startISO){
+    toast('请选择有效的起始日期', 'warn'); return;
+  }
+  /* 从所选日期开始取完整的拍摄窗口，不回退到当周已过去的拍摄日。 */
   const shootDays = [];
-  for (let w = 0; w < weeks; w++){
-    shootDays.push(addDays(monday, w*7 + 1));
-    shootDays.push(addDays(monday, w*7 + 4));
+  for (let offset = 0; offset < weeks*7; offset++){
+    const day = addDays(start, offset);
+    if (day.getDay()===2 || day.getDay()===5) shootDays.push(day);
   }
 
-  /* 按账号把素材铺到发布日 */
   const plan = [];
   const firstShoot = shootDays[0];
   ACCOUNTS.forEach(acc => {
     const list = items.filter(m => m.account === acc.name);
-    const pattern = Array.from({length:acc.perWeek},(_,i)=>Math.floor(i*7/acc.perWeek));
+    const perWeek = Math.max(1, Math.min(7, Math.floor(Number(acc.perWeek)||1)));
+    const pattern = new Set(Array.from({length:perWeek},(_,i)=>Math.floor(i*7/perWeek)));
     const slots = PLATFORM_SLOTS[acc.platform] || PLATFORM_SLOTS['小红书'];
+    let day = addDays(firstShoot, 1);
     list.forEach((m, i) => {
-      const week = Math.floor(i / pattern.length);
-      const off = pattern[i % pattern.length];
-      let day = addDays(monday, week*7 + off);
-      while (day < start) day = addDays(day, 7);
-      /* 发布必须晚于第一个拍摄日：不能发布还没拍的素材 */
-      while (day <= firstShoot) day = addDays(day, 7);
-      const time = slots[i % slots.length];
-      plan.push({ m: m, day: day, time: time });
+      /* 顺序消耗未来发布日，避免各自加一周后撞到同一天。 */
+      while (!pattern.has((day.getDay()+6)%7)) day = addDays(day, 1);
+      plan.push({ m, day, time:slots[i % slots.length] });
+      day = addDays(day, 1);
     });
   });
 
@@ -2469,7 +2468,7 @@ function renderData(){
   const today=StudioWorkflow.dayKey();
   const period=S.dataPeriod==='all'?'全部时间':S.dataPeriod==='undated'?'未填或无效发布日期':StudioWorkflow.shiftDay(today,S.dataPeriod==='7'?-6:-29)+' — '+today+'（含今天 · 上海时间）';
   $('#dataScope').textContent=period+' · '+S.dataFilter+' · 显示 '+list.length+' / '+S.metrics.length+' 条；指标、图表与回溯同步筛选。';
-  $('#dataMeta').textContent='手动录入平台后台数据；修改筛选只影响查看范围。';
+  $('#dataMeta').textContent='粘贴作品链接读取公开数据，后台指标可手动补充；保存后纳入复盘。';
 
   const totalViews = sum(list, m => m.views);
   const avgF3 = avg(list, m => m.finish_3s);
@@ -2590,7 +2589,53 @@ function fillDataFilter(){
   sel.value = S.dataFilter;
 }
 
+let metricImportRequest=null,metricImportResult=null;
+const METRIC_IMPORT_LABELS={title:'标题',platform:'平台',publish_date:'发布日期',likes:'点赞',comments:'评论',saves:'收藏',shares:'分享'};
+function resetMetricImport(){
+  if(metricImportRequest)metricImportRequest.abort();
+  metricImportRequest=null;metricImportResult=null;
+  $('#btnImportMetric').disabled=false;$('#btnImportMetric').textContent='读取链接数据';
+  $('#metricImportPreview').hidden=true;
+  $('#metricImportStatus').textContent='读取标题、发布日期和公开互动数据；读取结果核对后再保存。使用已配置的红狐数据源。';
+}
+async function importMetricLink(){
+  resetMetricImport();
+  const url=$('#mUrl').value.trim();
+  if(!url){$('#metricImportStatus').textContent='请先粘贴一条作品链接或分享文字。';$('#mUrl').focus();return;}
+  const controller=new AbortController();metricImportRequest=controller;
+  $('#btnImportMetric').disabled=true;$('#btnImportMetric').textContent='正在读取…';
+  $('#metricImportStatus').textContent='正在读取作品公开数据，请稍候…';
+  const timeout=setTimeout(()=>controller.abort(),90000);
+  try{
+    const key=window.SecureStore?.getKey()||'';
+    const response=await fetch('/api/metrics/import',{method:'POST',headers:{'Content-Type':'application/json',...(key?{'x-redfox-key':key}:{})},body:JSON.stringify({url}),signal:controller.signal});
+    const result=await response.json();
+    if(!response.ok||!result.ok)throw new Error(result.error||'读取失败，请稍后重试');
+    if(metricImportRequest!==controller||$('#metricForm').hidden||$('#mUrl').value.trim()!==url)return;
+    metricImportResult=result;
+    $('#metricImportFields').innerHTML=Object.entries(METRIC_IMPORT_LABELS).filter(([k])=>result.fields[k]!=null).map(([k,label])=>'<div><dt>'+esc(label)+'</dt><dd>'+esc(result.fields[k])+'</dd></div>').join('');
+    $('#metricImportPreview').hidden=false;
+    const missing=Object.entries(METRIC_IMPORT_LABELS).filter(([k])=>result.fields[k]==null).map(([,label])=>label);
+    $('#metricImportStatus').textContent='已读取，尚未填入或保存。'+(missing.length?'本次未获取：'+missing.join('、')+'。':'')+'数据以来源当前返回为准。';
+  }catch(e){
+    if(metricImportRequest!==controller)return;
+    $('#metricImportStatus').textContent=e.name==='AbortError'?'读取超时，请重试或手动录入。':e.message;
+  }finally{
+    clearTimeout(timeout);
+    if(metricImportRequest===controller){metricImportRequest=null;$('#btnImportMetric').disabled=false;$('#btnImportMetric').textContent='读取链接数据';}
+  }
+}
+function applyMetricImport(){
+  if(!metricImportResult)return;
+  const fields=metricImportResult.fields;
+  const inputs=[['mTitle','title'],['mDate','publish_date'],['mPlatform','platform'],['mUrl','video_url'],...METRIC_INPUTS];
+  inputs.forEach(([id,key])=>{if(fields[key]!=null)$('#'+id).value=fields[key];});
+  metricImportResult=null;$('#metricImportPreview').hidden=true;
+  $('#metricImportStatus').textContent='已填入，尚未保存。请核对账号、关联内容和数据，再点击「保存数据」。播放量及后台指标请按平台后台补充。';
+}
+
 function openMetricForm(id){
+  resetMetricImport();
   fillMetricControls();
   S.editingMetric = id || null;
   const m = id ? S.metrics.find(x => x.id === id) : null;
@@ -2601,7 +2646,7 @@ function openMetricForm(id){
   $('#mAccount').value = m ? m.account : (ACCOUNTS[0] && ACCOUNTS[0].name);
   $('#mPlatform').value = m ? (m.platform || '抖音') : '抖音';
   $('#mTitle').value = m ? (m.title || '') : '';
-  $('#mDate').value = m ? (m.publish_date || '') : ymd(new Date());
+  $('#mDate').value = m ? (m.publish_date || '') : '';
   $('#mUrl').value = m ? (m.video_url || '') : '';
   $('#mNote').value = m ? (m.note || '') : '';
   METRIC_INPUTS.forEach(p => { $('#' + p[0]).value = (m && m[p[1]] != null) ? m[p[1]] : ''; });
@@ -2610,6 +2655,7 @@ function openMetricForm(id){
 }
 
 function closeMetricForm(){
+  resetMetricImport();
   $('#metricForm').hidden = true;
   S.editingMetric = null;
   $('#btnToggleForm').textContent = '+ 录入一条数据';
@@ -3169,6 +3215,9 @@ function bind(){
   });
   $('#btnCancelMetric').addEventListener('click', closeMetricForm);
   $('#btnSaveMetric').addEventListener('click', saveMetric);
+  $('#btnImportMetric').addEventListener('click', importMetricLink);
+  $('#btnApplyMetricImport').addEventListener('click', applyMetricImport);
+  $('#mUrl').addEventListener('input', resetMetricImport);
   $('#dataFilter').addEventListener('change', e => {
     S.dataFilter = e.target.value;
     renderData();

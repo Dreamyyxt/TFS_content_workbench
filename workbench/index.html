@@ -319,7 +319,7 @@ node start-jianying.cjs</code></pre>
           <label class="inline-field">起始日期
             <input type="date" id="schedStart" />
           </label>
-          <label class="inline-field">排期周数
+          <label class="inline-field">拍摄周数
             <select id="schedWeeks">
               <option value="1">1 周</option>
               <option value="2" selected>2 周</option>
@@ -329,7 +329,7 @@ node start-jianying.cjs</code></pre>
           <button class="btn btn-primary" id="btnAutoSchedule">生成排期</button>
         </div>
       </div>
-      <p class="hint">生成范围：已勾选素材；未勾选时使用最新一批素材。</p>
+      <p class="hint">生成范围：已勾选素材；未勾选时使用最新一批素材。拍摄从起始日期起安排，发布按账号频次顺延，内容较多时会超出拍摄周数。</p>
     </div>
 
     </details>
@@ -409,7 +409,7 @@ node start-jianying.cjs</code></pre>
       <div class="panel-head">
         <div>
           <h2>视频数据看板</h2>
-          <p class="hint" id="dataMeta">数据需手动录入：把抖音 / 小红书后台的数据抄进来即可，录入后自动算达标情况</p>
+          <p class="hint" id="dataMeta">粘贴作品链接读取公开数据，后台指标可手动补充；保存后纳入复盘。</p>
         </div>
         <div class="panel-actions">
           <button class="btn btn-primary" id="btnToggleForm">+ 录入一条数据</button>
@@ -417,25 +417,38 @@ node start-jianying.cjs</code></pre>
       </div>
 
       <div id="metricForm" hidden>
+        <div class="metric-import">
+          <label class="fld" for="mUrl"><span>作品链接 · 视频或图文</span></label>
+          <div class="metric-import-entry">
+            <input id="mUrl" type="text" placeholder="粘贴抖音 / 小红书作品链接，也支持整段分享文字" aria-describedby="metricImportStatus" />
+            <button class="btn btn-primary" id="btnImportMetric" type="button">读取链接数据</button>
+          </div>
+          <p class="hint" id="metricImportStatus" role="status" aria-live="polite">读取标题、发布日期和公开互动数据；读取结果核对后再保存。使用已配置的红狐数据源。</p>
+          <div id="metricImportPreview" hidden>
+            <dl id="metricImportFields"></dl>
+            <p class="hint">填入会替换以上对应字段，其他字段保留。账号与排期关联请自行核对。</p>
+            <button class="btn btn-primary" id="btnApplyMetricImport" type="button">填入表单</button>
+          </div>
+          <p class="hint">播放量、曝光、完播率、私信、商品点击、核销与涨粉需从创作者后台补充。未获取的指标留空，不按 0 计算。</p>
+        </div>
         <div class="form-grid">
           <label class="fld"><span>关联已排期的内容</span><select id="mSchedule"></select></label>
           <label class="fld"><span>账号</span><select id="mAccount"></select></label>
           <label class="fld"><span>平台</span><select id="mPlatform"><option>抖音</option><option>小红书</option><option>双平台</option></select></label>
           <label class="fld"><span>发布日期</span><input id="mDate" type="date" /></label>
           <label class="fld fld-wide"><span>标题</span><input id="mTitle" type="text" placeholder="发布时用的标题" /></label>
-          <label class="fld fld-wide"><span>视频链接</span><input id="mUrl" type="text" placeholder="可留空，方便以后回看" /></label>
-          <label class="fld"><span>播放量</span><input id="mViews" type="number" min="0" placeholder="0" /></label>
-          <label class="fld"><span>曝光量</span><input id="mImpr" type="number" min="0" placeholder="0" /></label>
-          <label class="fld"><span>3 秒完播率 %</span><input id="mF3" type="number" step="0.1" min="0" placeholder="0" /></label>
-          <label class="fld"><span>5 秒完播率 %</span><input id="mF5" type="number" step="0.1" min="0" placeholder="0" /></label>
-          <label class="fld"><span>点赞</span><input id="mLikes" type="number" min="0" placeholder="0" /></label>
-          <label class="fld"><span>评论</span><input id="mComments" type="number" min="0" placeholder="0" /></label>
-          <label class="fld"><span>收藏</span><input id="mSaves" type="number" min="0" placeholder="0" /></label>
-          <label class="fld"><span>分享</span><input id="mShares" type="number" min="0" placeholder="0" /></label>
-          <label class="fld"><span>私信</span><input id="mDms" type="number" min="0" placeholder="0" /></label>
-          <label class="fld"><span>商品点击</span><input id="mClicks" type="number" min="0" placeholder="0" /></label>
-          <label class="fld"><span>团购核销</span><input id="mRedeem" type="number" min="0" placeholder="0" /></label>
-          <label class="fld"><span>涨粉</span><input id="mFollow" type="number" min="0" placeholder="0" /></label>
+          <label class="fld"><span>播放量</span><input id="mViews" type="number" min="0" placeholder="未填写" /></label>
+          <label class="fld"><span>曝光量</span><input id="mImpr" type="number" min="0" placeholder="未填写" /></label>
+          <label class="fld"><span>3 秒完播率 %</span><input id="mF3" type="number" step="0.1" min="0" placeholder="未填写" /></label>
+          <label class="fld"><span>5 秒完播率 %</span><input id="mF5" type="number" step="0.1" min="0" placeholder="未填写" /></label>
+          <label class="fld"><span>点赞</span><input id="mLikes" type="number" min="0" placeholder="未填写" /></label>
+          <label class="fld"><span>评论</span><input id="mComments" type="number" min="0" placeholder="未填写" /></label>
+          <label class="fld"><span>收藏</span><input id="mSaves" type="number" min="0" placeholder="未填写" /></label>
+          <label class="fld"><span>分享</span><input id="mShares" type="number" min="0" placeholder="未填写" /></label>
+          <label class="fld"><span>私信</span><input id="mDms" type="number" min="0" placeholder="未填写" /></label>
+          <label class="fld"><span>商品点击</span><input id="mClicks" type="number" min="0" placeholder="未填写" /></label>
+          <label class="fld"><span>团购核销</span><input id="mRedeem" type="number" min="0" placeholder="未填写" /></label>
+          <label class="fld"><span>涨粉</span><input id="mFollow" type="number" min="0" placeholder="未填写" /></label>
           <label class="fld fld-wide"><span>备注</span><input id="mNote" type="text" placeholder="如：投了 100 元 DOU+ / 换了封面" /></label>
         </div>
         <div class="form-actions">

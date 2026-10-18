@@ -41,6 +41,7 @@ const { URL } = require('url');
 
 const ROOT = __dirname;
 const TrendPolicy=require('./trend-policy');
+const MetricImport=require('./metric-import');
 const redfoxCache=TrendPolicy.createCache();
 const crypto=require('node:crypto');
 const JY_LOCAL = process.env.JY_LOCAL === '1';
@@ -1378,6 +1379,27 @@ const server = http.createServer(async (req, res) => {
   }
   if (pathname === '/api/health') {
     return sendJson(res, 200, { ok: true, service: 'nail-content-workbench', time: new Date().toISOString() });
+  }
+
+  if (pathname === '/api/metrics/import') {
+    if(req.method!=='POST') return sendJson(res,405,{ok:false,error:'use POST'});
+    if(!access.knownOrigin(req.headers.origin, String(req.headers.host||'').split(':')[0]))
+      return sendJson(res,403,{ok:false,error:'请在工作台页面读取链接'});
+    if(!String(req.headers['content-type']||'').startsWith('application/json'))
+      return sendJson(res,415,{ok:false,error:'请使用 JSON 请求'});
+    let input;
+    try{input=JSON.parse(await readBody(req,12288));MetricImport.parseLink(input?.url);}
+    catch(e){return sendJson(res,400,{ok:false,error:e instanceof SyntaxError?'请求格式不正确':e.message});}
+    const key=String(req.headers['x-redfox-key']||REDFOX_KEY||'').trim();
+    if(!key)return sendJson(res,401,{ok:false,need_key:true,error:'请先在「风口选题 → 数据源配置」配置红狐密钥，或由服务端配置'});
+    try{
+      const result=await MetricImport.importMetric(input.url,key,{open:mcpOpen,call:mcpCall});
+      return sendJson(res,200,{ok:true,...result});
+    }catch(e){
+      // Do not echo upstream errors, request URLs/tokens or credentials into the UI/logs.
+      const auth=/401|403|密钥/.test(String(e.message));
+      return sendJson(res,502,{ok:false,error:auth?'红狐密钥无效或无权限，请检查数据源配置':'未能读取作品数据。请检查数据源额度及作品是否公开、是否已收录，或改用浏览器打开后的完整链接重试；也可手动录入。'});
+    }
   }
 
   if (pathname === '/api/trend/config') return sendJson(res,200,{serverConfigured:!!REDFOX_KEY});
