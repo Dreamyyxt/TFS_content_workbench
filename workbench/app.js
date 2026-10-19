@@ -2468,7 +2468,7 @@ function renderData(){
   const today=StudioWorkflow.dayKey();
   const period=S.dataPeriod==='all'?'全部时间':S.dataPeriod==='undated'?'未填或无效发布日期':StudioWorkflow.shiftDay(today,S.dataPeriod==='7'?-6:-29)+' — '+today+'（含今天 · 上海时间）';
   $('#dataScope').textContent=period+' · '+S.dataFilter+' · 显示 '+list.length+' / '+S.metrics.length+' 条；指标、图表与回溯同步筛选。';
-  $('#dataMeta').textContent='粘贴作品链接读取公开数据，后台指标可手动补充；保存后纳入复盘。';
+  $('#dataMeta').textContent='导入创作者中心导出表，也可通过链接或手动录入，统一查看视频与图文表现。';
 
   const totalViews = sum(list, m => m.views);
   const avgF3 = avg(list, m => m.finish_3s);
@@ -2479,7 +2479,7 @@ function renderData(){
   renderDataVisuals(list, avgF3);
 
   $('#dataKpis').innerHTML = [
-    kpiCard('已录入视频', list.length, '当前筛选范围 · 共 ' + S.metrics.length + ' 条', 'is-brand'),
+    kpiCard('已录入作品', list.length, '当前筛选范围 · 共 ' + S.metrics.length + ' 条', 'is-brand'),
     kpiCard('总播放量', nfNum(totalViews), list.length ? list.length + ' 条合计' : '暂无数据'),
     kpiCard('平均 3 秒完播', avgF3 == null ? '—' : nfPct(avgF3), '参考线 ≥ ' + THRESH.f3 + '%',
       avgF3 == null ? '' : (avgF3 >= THRESH.f3 ? 'is-ok' : 'is-warn')),
@@ -2514,7 +2514,7 @@ function renderData(){
             '<small><span class="tag tag-account" data-k="' + esc(acc.key) + '">' + esc(m.account) + '</span> ' +
             esc(m.platform || '') +
             (m.video_url ? ' · <a href="' + esc(m.video_url) + '" target="_blank" rel="noopener">看原片</a>' : '') +
-            (m.note ? ' · ' + esc(m.note) : '') + '</small></td>' +
+            (MetricSpreadsheet.unpack(m.note).note ? ' · ' + esc(MetricSpreadsheet.unpack(m.note).note) : '') + '</small>'+metricExportDetails(m)+'</td>' +
           '<td class="num">' + nfNum(m.views) + '</td>' +
           '<td class="num">' + rateFlag(m.finish_3s == null ? null : Number(m.finish_3s), THRESH.f3) + '</td>' +
           '<td class="num">' + rateFlag(m.finish_5s == null ? null : Number(m.finish_5s), THRESH.f5) + '</td>' +
@@ -2556,6 +2556,16 @@ function renderData(){
         '</div>';}).join('')
     : '<p class="hint" style="margin:0">录入数据后，这里会按 3 秒完播率排出表现最好的选题，' +
       '下一轮「刷新风口」就可以照着加码同类素材。</p>';
+}
+
+function metricExportDetails(metric){
+  const source=MetricSpreadsheet.unpack(metric.note).source;if(!source)return '';
+  const text=Object.entries(MetricSpreadsheet.LABELS).map(([key,label])=>{
+    const value=source.extra?.[key];
+    const display=value==null?'—':key==='avg_watch_seconds'?Number(value).toFixed(2)+' 秒':key==='profile_visits'?nfNum(value):Number(value).toFixed(2)+'%';
+    return '<span>'+label+'：'+esc(display)+'</span>';
+  }).join('');
+  return '<details class="metric-export-details"><summary>查看导出明细</summary><div><span>发布时间：'+esc(source.published_at)+'</span><span>体裁：'+esc(source.genre||'—')+' · 状态：'+esc(source.review_status||'—')+'</span>'+text+'</div></details>';
 }
 
 /* ---- 录入表单 ---- */
@@ -2648,7 +2658,7 @@ function openMetricForm(id){
   $('#mTitle').value = m ? (m.title || '') : '';
   $('#mDate').value = m ? (m.publish_date || '') : '';
   $('#mUrl').value = m ? (m.video_url || '') : '';
-  $('#mNote').value = m ? (m.note || '') : '';
+  $('#mNote').value = m ? MetricSpreadsheet.unpack(m.note).note : '';
   METRIC_INPUTS.forEach(p => { $('#' + p[0]).value = (m && m[p[1]] != null) ? m[p[1]] : ''; });
 
   $('#metricFormHint').textContent = m ? '正在编辑已有记录，保存后覆盖原数据。' : '标题必填，其余可留空，之后随时回来补。';
@@ -2672,7 +2682,7 @@ async function saveMetric(){
     title: title,
     publish_date: $('#mDate').value || null,
     video_url: $('#mUrl').value.trim() || null,
-    note: $('#mNote').value.trim() || null,
+    note: MetricSpreadsheet.pack($('#mNote').value.trim(),MetricSpreadsheet.unpack(S.metrics.find(m=>StudioWorkflow.sameId(m.id,S.editingMetric))?.note).source),
     ops_name: opsName()
   };
   METRIC_INPUTS.forEach(p => { row[p[1]] = numOrNull($('#' + p[0]).value); });
@@ -2820,7 +2830,7 @@ const WIPE_TARGETS = [
     count: () => S.scripts.length },
   { key:'schedules',     label:'排期表',            desc:'自动排期生成的拍摄日与发布时间',
     count: () => S.schedules.length },
-  { key:'video_metrics', label:'视频数据',          desc:'「数据看板」里手动录入的平台后台数据',
+  { key:'video_metrics', label:'视频数据',          desc:'「数据看板」里手动录入或导入的平台后台数据',
     count: () => S.metrics.length },
   { key:'trend_ai',      label:'AI 生成的风向快照', desc:'「生成新的视频计划」留下的推演记录；最新一批联网快照与内置底稿会保留',
     count: () => S.trendAll.filter(r => r.source === 'ai').length },
@@ -3214,6 +3224,22 @@ function bind(){
     else closeMetricForm();
   });
   $('#btnCancelMetric').addEventListener('click', closeMetricForm);
+  MetricFileImport.mount({
+    getAccounts:()=>ACCOUNTS,operator:opsName,
+    readExisting:async account=>{
+      const {data,error}=await cloud.database.from('video_metrics').select('*').eq('account',account).eq('platform','抖音').limit(1000);
+      if(error)throw error;
+      if((data||[]).length>=1000)throw Error('该账号已达 1000 条核对上限，暂不能安全批量导入');
+      return data||[];
+    },
+    write:async(action,row,id)=>{
+      const query=cloud.database.from('video_metrics');
+      const result=action==='update'?await query.update(row).eq('id',id).select():await query.insert(row).select();
+      if(result.error)throw result.error;
+      if(!Array.isArray(result.data)||result.data.length!==1)throw Error('未收到保存确认，请重新核对云端数据后再试');
+    },
+    refresh:async()=>{await dbLoadMetrics();renderData();renderProgress();renderBadges();}
+  });
   $('#btnSaveMetric').addEventListener('click', saveMetric);
   $('#btnImportMetric').addEventListener('click', importMetricLink);
   $('#btnApplyMetricImport').addEventListener('click', applyMetricImport);

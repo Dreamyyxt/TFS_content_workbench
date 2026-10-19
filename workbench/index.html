@@ -408,13 +408,32 @@ node start-jianying.cjs</code></pre>
     <div class="panel">
       <div class="panel-head">
         <div>
-          <h2>视频数据看板</h2>
-          <p class="hint" id="dataMeta">粘贴作品链接读取公开数据，后台指标可手动补充；保存后纳入复盘。</p>
+          <h2>作品数据看板</h2>
+          <p class="hint" id="dataMeta">导入创作者中心导出表，也可通过链接或手动录入，统一查看视频与图文表现。</p>
         </div>
         <div class="panel-actions">
-          <button class="btn btn-primary" id="btnToggleForm">+ 录入一条数据</button>
+          <button class="btn btn-primary" id="btnOpenMetricFile" type="button">导入 Excel 数据</button>
+          <button class="btn btn-ghost" id="btnToggleForm">+ 录入一条数据</button>
         </div>
       </div>
+
+      <section id="metricFilePanel" class="metric-file-panel" aria-label="导入创作者中心数据" hidden>
+        <div class="panel-head"><div><h3>导入作品列表</h3><p class="hint">支持抖音创作者中心原始导出的 .xlsx，包含视频和图文。文件在本机解析，确认后才保存数据。</p></div><button type="button" class="text-button" id="btnCloseMetricFile">收起导入</button></div>
+        <div class="metric-file-controls">
+          <label class="fld"><span>选择导出文件</span><input id="metricFileInput" type="file" accept=".xlsx" /></label>
+          <label class="fld"><span>这份表属于哪个账号？</span><select id="metricFileAccount"><option value="">请选择所属账号</option></select></label>
+          <label class="fld"><span>遇到已导入的作品</span><select id="metricFileMode"><option value="skip">跳过，不修改已有数据</option><option value="update">更新本次表格有值的指标</option></select></label>
+        </div>
+        <p class="hint">表格不含账号信息，请核对所属账号。完整完播率与 3 秒完播率分别保存；空值保持缺失，不当作 0。更新会替换统计值，不累加；请使用较新的导出表。</p>
+        <p class="hint">没有作品 ID 时，按账号、平台、完整发布时间和标题识别重复；相似记录会标为待核对。</p>
+        <p id="metricFileStatus" role="status" aria-live="polite">选择文件后预览数据，每次最多 2000 条、10 MB。</p>
+        <div id="metricFilePreview" hidden>
+          <p id="metricFileSummary"></p>
+          <ul id="metricFileErrors" class="metric-file-errors" hidden></ul>
+          <div class="metric-file-table" role="region" aria-label="Excel 导入预览，可横向滚动" tabindex="0"><table class="dtable"><thead><tr><th><input id="metricFileAll" type="checkbox" aria-label="选择全部可导入作品" /></th><th>行</th><th>作品名称</th><th>发布时间</th><th>体裁</th><th>播放</th><th>完整完播</th><th>5 秒完播</th><th>赞 / 评 / 藏</th><th>处理方式</th></tr></thead><tbody id="metricFileRows"></tbody></table></div>
+        </div>
+        <div class="form-actions"><button type="button" class="btn btn-ghost" id="btnRefreshMetricFile">重新核对</button><button type="button" class="btn btn-primary" id="btnConfirmMetricFile" disabled>确认导入 0 条</button></div>
+      </section>
 
       <div id="metricForm" hidden>
         <div class="metric-import">
@@ -658,6 +677,8 @@ node start-jianying.cjs</code></pre>
 <script src="./studio-workflow.js"></script>
 <script src="./shooting-plan.js"></script>
 <script src="./studio-shooting.js"></script>
+<script src="./metric-spreadsheet.js"></script>
+<script src="./metric-file-import.js"></script>
 <script src="./app.js"></script>
 <script src="./account-settings.js"></script>
 <script src="./jy-catalog.js"></script>

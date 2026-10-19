@@ -1273,6 +1273,11 @@ function sendJson(res, code, obj) {
 const STATIC_FILES = new Set([
   '/index.html',
   '/app.js',
+  '/metric-spreadsheet.js',
+  '/metric-file-import.js',
+  '/metric-spreadsheet-worker.js',
+  '/vendor/xlsx-0.20.3.min.js',
+  '/vendor/SHEETJS-LICENSE.txt',
   '/styles.css',
   '/studio.css',
   '/account-strategy.js',
