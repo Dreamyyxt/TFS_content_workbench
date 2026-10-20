@@ -67,3 +67,40 @@ test('ZIP metadata bounds reject excessive expansion and encrypted archives befo
  const bomb=Buffer.from(bytes);bomb.writeUInt32LE(40*1024*1024,central+24);assert.throws(()=>P.validateZip(bomb),/过大/);
  const encrypted=Buffer.from(bytes);encrypted.writeUInt16LE(1,central+8);assert.throws(()=>P.validateZip(encrypted),/加密/);
 });
+
+const xhsHeaders=['笔记标题','首次发布时间','体裁','曝光','观看量','封面点击率','点赞','评论','收藏','涨粉','分享','人均观看时长','弹幕'];
+const xhsRow=(title='合成笔记',time='2026年10月20日08时58分32秒')=>[title,time,'图文',328,26,0.079,1,0,2,0,0,4,3];
+function xhs(rows=[xhsRow()],edit=()=>{}){
+ const wb=XLSX.utils.book_new(),ws=XLSX.utils.aoa_to_sheet([Array(13).fill('最多导出排序后前1000条笔记'),xhsHeaders,...rows]);
+ edit(ws);XLSX.utils.book_append_sheet(wb,ws,'Sheet1');return P.parse(XLSX.write(wb,{type:'array',bookType:'xlsx'}),XLSX);
+}
+test('Xiaohongshu skips repeated preamble and maps Chinese timestamp, exposure, watching and native metrics',()=>{
+ const parsed=xhs(),row=parsed.rows[0];assert.equal(parsed.platform,'小红书');assert.equal(parsed.count,1);assert.deepEqual(parsed.errors,[]);assert.equal(row.line,3);
+ assert.equal(row.source.published_at,'2026-10-20 08:58:32');assert.equal(row.fields.publish_date,'2026-10-20');assert.equal(row.fields.impressions,328);assert.equal(row.fields.views,26);
+ assert.equal(row.fields.followers_gain,0);assert.equal(row.source.extra.cover_click_rate,7.9);assert.equal(row.source.extra.avg_view_seconds,4);assert.equal(row.source.extra.danmaku,3);
+ assert.ok(!('completion_rate' in row.source.extra));assert.equal(P.payload(row,'A','test').finish_5s,null);assert.equal(P.payload(row,'A','test').platform,'小红书');
+ assert.equal(P.formatExtra('avg_view_seconds',4),'4.00 秒');assert.equal(P.formatExtra('danmaku',3),'3');assert.equal(P.formatExtra('cover_click_rate',7.9),'7.90%');
+});
+test('Xiaohongshu preserves zeros and missing metrics, reports invalid Chinese dates and formula rows',()=>{
+ const r=xhsRow();r[3]='-';r[5]='0.5%';r[9]=-1;r[12]=0;
+ const row=xhs([r]).rows[0];assert.ok(!('impressions' in row.fields));assert.equal(row.source.extra.cover_click_rate,0.5);assert.equal(row.source.extra.danmaku,0);assert.equal(row.fields.followers_gain,-1);
+ assert.equal(xhs([xhsRow('坏日期','2026年02月30日08时00分00秒')]).errors.length,1);
+ assert.match(xhs([xhsRow()],ws=>{ws.D3.f='1+2';}).errors[0].message,/公式/);
+ assert.throws(()=>xhs([xhsRow()],ws=>{ws.N2={t:'s',v:'曝光'};ws['!ref']='A1:N3';}),/重复列名/);
+});
+test('dual-platform account keeps identical titles/timestamps separate and preserves Xiaohongshu metadata during edits',()=>{
+ const row=xhs().rows[0],dy=parse([record(row.fields.title,row.source.published_at)]).rows[0];
+ const old=existing(row,'老板IP号'),other=existing(dy,'老板IP号',2);old.note=P.pack('人工备注',P.unpack(old.note).source);old.finish_5s=42;
+ assert.equal(P.plan([row],[other],'老板IP号')[0].action,'insert');assert.equal(P.plan([dy],[old],'老板IP号')[0].action,'insert');
+ assert.equal(P.plan([row],[old,other],'老板IP号')[0].action,'skip');assert.equal(P.plan([row],[old,other],'小红书官方号')[0].action,'insert');
+ const next={...row,fields:{title:row.fields.title,publish_date:row.fields.publish_date,views:100},source:{...row.source,extra:{danmaku:0}}};
+ const update=P.payload(P.plan([next],[old,other],'老板IP号','update')[0],'老板IP号','test');assert.equal(update.platform,'小红书');assert.equal(update.views,100);assert.ok(!('impressions' in update));assert.ok(!('finish_5s' in update));
+ assert.equal(P.unpack(update.note).note,'人工备注');assert.equal(P.unpack(update.note).source.extra.avg_view_seconds,4);assert.equal(P.unpack(update.note).source.extra.danmaku,0);
+ assert.equal(P.plan([row],[{...old,note:'旧手填数据'}],'老板IP号')[0].action,'conflict');
+});
+test('commit passes detected platform to the cloud read and refuses mixed-platform batches before writes',async()=>{
+ const row=xhs().rows[0],queries=[],writes=[];
+ const args={account:'老板IP号',operator:'test',readExisting:async(...args)=>{queries.push(args);return [];},write:async(action,data)=>writes.push(data)};
+ assert.equal((await P.commit([row],args)).saved,1);assert.deepEqual(queries,[['老板IP号','小红书']]);assert.equal(writes[0].platform,'小红书');
+ await assert.rejects(()=>P.commit([row,parse().rows[0]],args),/按平台/);assert.equal(writes.length,1);assert.equal(queries.length,1);
+});

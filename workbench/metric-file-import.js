@@ -19,25 +19,30 @@
       $('metricFileAll').disabled=busy||!eligible.length;
     }
     function extraPreview(row){
-      const fields=[['审核状态',row.source.review_status||'—'],['分享',row.fields.shares??'—'],['粉丝增量',row.fields.followers_gain??'—']];
+      const fields=[['分享',row.fields.shares??'—'],['粉丝增量',row.fields.followers_gain??'—']];
+      if(row.source.review_status)fields.unshift(['审核状态',row.source.review_status]);
       for(const [key,label] of Object.entries(P.LABELS)){
-        if(key==='completion_rate')continue;
+        if(key==='completion_rate'||(parsed.platform==='小红书'&&key==='cover_click_rate'))continue;
         const n=row.source.extra[key];
-        fields.push([label,n==null?'—':key==='avg_watch_seconds'?Number(n).toFixed(2)+' 秒':key==='profile_visits'?n:Number(n).toFixed(2)+'%']);
+        if(n!=null)fields.push([label,P.formatExtra(key,n)]);
       }
       return '<details class="metric-export-details"><summary>其他导出指标</summary><div>'+fields.map(([label,value])=>'<span>'+label+'：'+esc(value)+'</span>').join('')+'</div></details>';
     }
     function render(){
       $('metricFilePreview').hidden=!parsed;
       if(!parsed){updateButton();return;}
+      const xhs=parsed.platform==='小红书';
+      $('metricFileViewsHeading').textContent=xhs?'观看量':'播放量';
+      $('metricFileMetric1Heading').textContent=xhs?'曝光':'完整完播';
+      $('metricFileMetric2Heading').textContent=xhs?'封面点击率':'5 秒完播';
       const counts={insert:0,update:0,skip:0,conflict:0};plan.forEach(r=>counts[r.action]++);
-      $('metricFileSummary').textContent='共 '+parsed.count+' 条 · 新增 '+counts.insert+' · 更新 '+counts.update+' · 跳过 '+counts.skip+' · 待核对 '+counts.conflict+' · 无效 '+parsed.errors.length;
+      $('metricFileSummary').textContent='共 '+parsed.count+' 条 · 新增 '+counts.insert+' · 更新 '+counts.update+' · 跳过 '+counts.skip+' · 待核对 '+counts.conflict+' · 无效 '+parsed.errors.length+' · '+parsed.platform;
       $('metricFileErrors').hidden=!parsed.errors.length;
       $('metricFileErrors').innerHTML=parsed.errors.map(e=>'<li>第 '+e.line+' 行：'+esc(e.message)+'</li>').join('');
       $('metricFileRows').innerHTML=plan.map(row=>{
         const enabled=['insert','update'].includes(row.action),f=row.fields;
         const number=n=>n==null?'—':esc(n),pct=n=>n==null?'—':Number(n).toFixed(2)+'%';
-        return '<tr><td><input type="checkbox" data-import-line="'+row.line+'" aria-label="选择第 '+row.line+' 行" '+(selected.has(row.line)?'checked ':'')+(!enabled||busy?'disabled':'')+'></td><td>'+row.line+'</td><td class="metric-file-title">'+esc(f.title)+extraPreview(row)+'</td><td>'+esc(row.source.published_at)+'</td><td>'+esc(row.source.genre||'—')+'</td><td>'+number(f.views)+'</td><td>'+pct(row.source.extra.completion_rate)+'</td><td>'+pct(f.finish_5s)+'</td><td>'+number(f.likes)+' / '+number(f.comments)+' / '+number(f.saves)+'</td><td>'+esc(row.reason)+'</td></tr>';
+        return '<tr><td><input type="checkbox" data-import-line="'+row.line+'" aria-label="选择第 '+row.line+' 行" '+(selected.has(row.line)?'checked ':'')+(!enabled||busy?'disabled':'')+'></td><td>'+row.line+'</td><td class="metric-file-title">'+esc(f.title)+extraPreview(row)+'</td><td>'+esc(row.source.published_at)+'</td><td>'+esc(row.source.genre||'—')+'</td><td>'+number(f.views)+'</td><td>'+(xhs?number(f.impressions):pct(row.source.extra.completion_rate))+'</td><td>'+(xhs?pct(row.source.extra.cover_click_rate):pct(f.finish_5s))+'</td><td>'+number(f.likes)+' / '+number(f.comments)+' / '+number(f.saves)+'</td><td>'+esc(row.reason)+'</td></tr>';
       }).join('');updateButton();
     }
     async function refresh(){
@@ -45,26 +50,29 @@
       const rev=++revision;ready=false;plan=[];selected.clear();render();
       if(!parsed)return;
       const account=$('metricFileAccount').value;
-      if(!account){statusText('文件已解析。请选择这份导出表所属的工作台账号，核对后再导入。');return;}
+      if(!account){statusText('已识别为'+parsed.platform+'导出表。请选择这份导出表所属的工作台账号，核对后再导入。');return;}
       statusText('正在核对该账号已有数据…');
       try{
-        const existing=await api.readExisting(account);
+        const existing=await api.readExisting(account,parsed.platform);
         if(rev!==revision||panel.hidden)return;
         plan=P.plan(parsed.rows,existing,account,$('metricFileMode').value);
         selected=new Set(plan.filter(r=>['insert','update'].includes(r.action)).map(r=>r.line));ready=true;
-        statusText('已完成核对，尚未保存。可取消勾选不需要导入的作品。');render();
+        statusText(parsed.platform+' · '+account+'：已完成核对，尚未保存。可取消勾选不需要导入的作品。');render();
       }catch(e){if(rev===revision)statusText('无法核对已有数据：'+(e.message||e)+'。未导入，请点击重新核对。');}
     }
-    function open(){
-      if(busy)return;panel.hidden=false;
-      const value=$('metricFileAccount').value;
-      $('metricFileAccount').innerHTML='<option value="">请选择所属账号</option>'+api.getAccounts().filter(a=>['抖音','双平台'].includes(a.platform)).map(a=>'<option value="'+esc(a.name)+'">'+esc(a.displayName||a.name)+'</option>').join('');
+    function fillAccounts(reset=false){
+      const value=reset?'':$('metricFileAccount').value;
+      $('metricFileAccount').innerHTML='<option value="">请选择所属账号</option>'+api.getAccounts().filter(a=>a.platform==='双平台'||(parsed?a.platform===parsed.platform:['抖音','小红书'].includes(a.platform))).map(a=>'<option value="'+esc(a.name)+'">'+esc(a.displayName||a.name)+'</option>').join('');
       $('metricFileAccount').value=value;
+    }
+    function open(){
+      if(busy)return;panel.hidden=false;fillAccounts();
       if(parsed)refresh();
       panel.scrollIntoView({behavior:'smooth',block:'start'});$('metricFileInput').focus();
     }
     function close(){if(busy)return;revision++;stopWorker();parsed=null;plan=[];selected.clear();ready=false;$('metricFileInput').value='';panel.hidden=true;render();$('btnOpenMetricFile').focus();}
     async function readFile(){
+      const previousPlatform=parsed?.platform;
       stopWorker();const rev=++revision;parsed=null;plan=[];selected.clear();ready=false;render();
       const file=$('metricFileInput').files[0];if(!file){statusText('请选择创作者中心导出的 .xlsx 文件。');return;}
       if(!/\.xlsx$/i.test(file.name)||file.size>P.MAX_BYTES){statusText('请选择不超过 10 MB 的 .xlsx 文件。');return;}
@@ -75,7 +83,7 @@
         worker.onmessage=event=>{
           if(rev!==revision)return;stopWorker();
           if(!event.data.ok){statusText(event.data.error);return;}
-          parsed=event.data.result;refresh();
+          parsed=event.data.result;fillAccounts(!!previousPlatform&&previousPlatform!==parsed.platform);refresh();
         };
         worker.onerror=()=>{if(rev!==revision)return;stopWorker();statusText('表格解析失败，请重新导出或换一个文件。');};
         timer=setTimeout(()=>{if(rev===revision){stopWorker();statusText('解析超时，请缩小导出范围后重试。');}},15000);
@@ -96,7 +104,7 @@
           '导入完成：保存 '+result.saved+' 条，跳过 '+result.skipped+' 条，待核对 '+result.conflicts+' 条。')+(result.error?' '+result.error:'')+' '+reloadError);
       };
       try{
-        if(navigator.locks)await navigator.locks.request('tfs-metric-xlsx:'+account,{ifAvailable:true},async lock=>{if(!lock){statusText('另一个页面正在导入这个账号，请完成后重新核对。');return;}await run();});
+        if(navigator.locks)await navigator.locks.request('tfs-metric-xlsx:'+parsed.platform+':'+account,{ifAvailable:true},async lock=>{if(!lock){statusText('另一个页面正在导入这个账号，请完成后重新核对。');return;}await run();});
         else await run();
       }catch(e){ready=false;statusText('导入已停止：'+(e.message||e)+'。请重新核对后再试。');}
       finally{busy=false;disableControls(false);render();}

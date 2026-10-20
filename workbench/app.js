@@ -2480,12 +2480,12 @@ function renderData(){
 
   $('#dataKpis').innerHTML = [
     kpiCard('已录入作品', list.length, '当前筛选范围 · 共 ' + S.metrics.length + ' 条', 'is-brand'),
-    kpiCard('总播放量', nfNum(totalViews), list.length ? list.length + ' 条合计' : '暂无数据'),
+    kpiCard('播放 / 观看总量', nfNum(totalViews), list.length ? list.length + ' 条合计' : '暂无数据'),
     kpiCard('平均 3 秒完播', avgF3 == null ? '—' : nfPct(avgF3), '参考线 ≥ ' + THRESH.f3 + '%',
       avgF3 == null ? '' : (avgF3 >= THRESH.f3 ? 'is-ok' : 'is-warn')),
     kpiCard('平均 5 秒完播', avgF5 == null ? '—' : nfPct(avgF5), '参考线 ≥ ' + THRESH.f5 + '%',
       avgF5 == null ? '' : (avgF5 >= THRESH.f5 ? 'is-ok' : 'is-warn')),
-    kpiCard('互动率', interRate == null ? '—' : nfPct(interRate), '赞+评+藏+分享 / 播放'),
+    kpiCard('互动率', interRate == null ? '—' : nfPct(interRate), '赞+评+藏+分享 / 播放或观看'),
     kpiCard('团购核销', nfNum(sum(list, m => m.groupon_redeemed)), '商品点击 ' + nfNum(sum(list, m => m.groupon_clicks)),
       sum(list, m => m.groupon_redeemed) > 0 ? 'is-ok' : '')
   ].join('');
@@ -2499,7 +2499,7 @@ function renderData(){
     $('#dataTable').innerHTML =
       '<table class="dtable"><thead><tr>' +
         '<th>发布日期</th><th>账号 / 标题</th>' +
-        '<th class="num">播放</th><th class="num">3 秒完播</th><th class="num">5 秒完播</th>' +
+        '<th class="num">播放 / 观看</th><th class="num">3 秒完播</th><th class="num">5 秒完播</th>' +
         '<th class="num">赞 / 评 / 藏</th><th class="num">私信</th>' +
         '<th class="num">商品点击</th><th class="num">核销</th><th class="num">涨粉</th>' +
         '<th></th>' +
@@ -2547,7 +2547,7 @@ function renderData(){
         return '<div class="rank-row' + (i === 0 ? ' is-top' : '') + '">' +
         '<div class="rank-no">' + (i+1) + '</div>' +
         '<div class="rank-title">' + esc(m.title || '') +
-          '<small>' + esc(m.account) + ' · 播放 ' + nfNum(m.views) +
+          '<small>' + esc(m.account) + (m.platform==='小红书'?' · 观看 ':' · 播放 ') + nfNum(m.views) +
           (m.groupon_redeemed ? ' · 核销 ' + nfNum(m.groupon_redeemed) : '') + '</small><div class="rank-source-links">'+
           (source.material?'<button class="text-button" data-focus-material="'+esc(source.material.id)+'">回看选题 ↗</button>':'')+
           (source.script?'<button class="text-button" data-open-script="'+esc(source.script.id)+'">查看脚本 ↗</button>':'')+
@@ -2560,12 +2560,13 @@ function renderData(){
 
 function metricExportDetails(metric){
   const source=MetricSpreadsheet.unpack(metric.note).source;if(!source)return '';
-  const text=Object.entries(MetricSpreadsheet.LABELS).map(([key,label])=>{
+  const text=Object.entries(MetricSpreadsheet.LABELS).filter(([key])=>source.extra?.[key]!=null).map(([key,label])=>{
     const value=source.extra?.[key];
-    const display=value==null?'—':key==='avg_watch_seconds'?Number(value).toFixed(2)+' 秒':key==='profile_visits'?nfNum(value):Number(value).toFixed(2)+'%';
+    const display=MetricSpreadsheet.formatExtra(key,value);
     return '<span>'+label+'：'+esc(display)+'</span>';
   }).join('');
-  return '<details class="metric-export-details"><summary>查看导出明细</summary><div><span>发布时间：'+esc(source.published_at)+'</span><span>体裁：'+esc(source.genre||'—')+' · 状态：'+esc(source.review_status||'—')+'</span>'+text+'</div></details>';
+  const reach=source.provider==='xiaohongshu-creator-xlsx'?'<span>观看量：'+nfNum(metric.views)+'</span><span>曝光：'+nfNum(metric.impressions)+'</span>':'';
+  return '<details class="metric-export-details"><summary>查看导出明细</summary><div><span>发布时间：'+esc(source.published_at)+'</span><span>体裁：'+esc(source.genre||'—')+(source.review_status?' · 状态：'+esc(source.review_status):'')+'</span>'+reach+text+'</div></details>';
 }
 
 /* ---- 录入表单 ---- */
@@ -3077,7 +3078,7 @@ function renderDataVisuals(list, average){
   });
   const days = [...byDay.entries()].sort(([a],[b])=>a.localeCompare(b)).slice(-7);
   const max = Math.max(1,...days.map(([,v])=>v));
-  $('#dataChart').innerHTML = days.length ? '<div class="chart-bars" role="img" aria-label="'+esc(days.map(([day,v])=>day+' 播放 '+v).join('；'))+'">'+days.map(([day,v])=>'<div class="chart-column" title="'+esc(day)+' · 播放 '+v+'"><b>'+nfNum(v)+'</b><div class="chart-bar" style="height:'+Math.max(2,v/max*154)+'px"></div><small>'+Number(day.slice(5,7))+'/'+Number(day.slice(8))+'</small></div>').join('')+'</div>' : '<div class="chart-empty"><span aria-hidden="true">▥</span>录入作品数据后，播放表现会出现在这里</div>';
+  $('#dataChart').innerHTML = days.length ? '<div class="chart-bars" role="img" aria-label="'+esc(days.map(([day,v])=>day+' 播放 / 观看 '+v).join('；'))+'">'+days.map(([day,v])=>'<div class="chart-column" title="'+esc(day)+' · 播放 / 观看 '+v+'"><b>'+nfNum(v)+'</b><div class="chart-bar" style="height:'+Math.max(2,v/max*154)+'px"></div><small>'+Number(day.slice(5,7))+'/'+Number(day.slice(8))+'</small></div>').join('')+'</div>' : '<div class="chart-empty"><span aria-hidden="true">▥</span>录入作品数据后，播放与观看表现会出现在这里</div>';
   const pct = average == null ? 0 : Math.max(0, Math.min(100, average));
   const display = average == null ? '—' : nfPct(average);
   $('#dataRetention').innerHTML = '<div class="retention-ring" role="img" aria-label="平均3秒完播率 '+esc(average == null ? '暂无数据' : display)+'"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="ring-track" cx="60" cy="60" r="48"/><circle class="ring-value" cx="60" cy="60" r="48" pathLength="100" stroke-dasharray="'+pct+' 100"'+(pct===0?' style="opacity:0"':'')+'/></svg><div class="ring-copy"><strong>'+display+'</strong><small>'+(average == null ? '等待数据' : average >= THRESH.f3 ? '达到参考线' : '仍有提升空间')+'</small></div></div>';
@@ -3226,8 +3227,8 @@ function bind(){
   $('#btnCancelMetric').addEventListener('click', closeMetricForm);
   MetricFileImport.mount({
     getAccounts:()=>ACCOUNTS,operator:opsName,
-    readExisting:async account=>{
-      const {data,error}=await cloud.database.from('video_metrics').select('*').eq('account',account).eq('platform','抖音').limit(1000);
+    readExisting:async(account,platform)=>{
+      const {data,error}=await cloud.database.from('video_metrics').select('*').eq('account',account).eq('platform',platform).limit(1000);
       if(error)throw error;
       if((data||[]).length>=1000)throw Error('该账号已达 1000 条核对上限，暂不能安全批量导入');
       return data||[];

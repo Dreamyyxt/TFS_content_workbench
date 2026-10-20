@@ -1,4 +1,4 @@
-/* Douyin creator export adapter. Files and cell contents are data, never instructions. */
+/* Creator export adapters (Douyin and Xiaohongshu). Files and cell contents are data, never instructions. */
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.MetricSpreadsheet=api;})(typeof globalThis!=='undefined'?globalThis:this,()=>{
   'use strict';
   const MAX_ROWS=2000,MAX_BYTES=10*1024*1024;
@@ -9,8 +9,29 @@
     '完播率':['completion_rate','rate'],'封面点击率':['cover_click_rate','rate'],
     '2s跳出率':['bounce_2s','rate'],'平均播放时长':['avg_watch_seconds','duration'],'主页访问量':['profile_visits','count']
   };
-  const EXTRA=new Set(['completion_rate','cover_click_rate','bounce_2s','avg_watch_seconds','profile_visits']);
-  const LABELS={completion_rate:'完整完播率',cover_click_rate:'封面点击率',bounce_2s:'2 秒跳出率',avg_watch_seconds:'平均播放时长',profile_visits:'主页访问量'};
+  const XHS_COLUMNS={
+    '曝光':['impressions','count'],'观看量':['views','count'],'封面点击率':['cover_click_rate','rate'],
+    '点赞':['likes','count'],'评论':['comments','count'],'收藏':['saves','count'],
+    '涨粉':['followers_gain','signed'],'分享':['shares','count'],
+    '人均观看时长':['avg_view_seconds','duration'],'弹幕':['danmaku','count']
+  };
+  const ADAPTERS=[
+    {provider:'douyin-creator-xlsx',platform:'抖音',title:'作品名称',date:'发布时间',required:'播放量',columns:COLUMNS},
+    {provider:'xiaohongshu-creator-xlsx',platform:'小红书',title:'笔记标题',date:'首次发布时间',required:'观看量',columns:XHS_COLUMNS}
+  ];
+  function platformFor(source){
+    const adapter=ADAPTERS.find(a=>a.provider===source?.provider);
+    if(!adapter)throw Error('不支持的导出来源，请重新选择平台原始表格');
+    return adapter.platform;
+  }
+  const EXTRA=new Set(['completion_rate','cover_click_rate','bounce_2s','avg_watch_seconds','profile_visits','avg_view_seconds','danmaku']);
+  const LABELS={completion_rate:'完整完播率',cover_click_rate:'封面点击率',bounce_2s:'2 秒跳出率',avg_watch_seconds:'平均播放时长',profile_visits:'主页访问量',avg_view_seconds:'人均观看时长',danmaku:'弹幕'};
+  function formatExtra(key,value){
+    if(value==null)return '—';
+    if(['avg_watch_seconds','avg_view_seconds'].includes(key))return Number(value).toFixed(2)+' 秒';
+    if(['profile_visits','danmaku'].includes(key))return String(value);
+    return Number(value).toFixed(2)+'%';
+  }
   const norm=v=>String(v??'').trim().replace(/\s+/g,' ');
   const header=v=>norm(v).replace(/\s/g,'').replace(/[Ｓｓ]/g,'s').toLowerCase();
   const missing=v=>v==null||['','-','--','—','暂无','N/A'].includes(String(v).trim());
@@ -40,7 +61,8 @@
       const p=n=>String(n).padStart(2,'0');
       value=parts.y+'-'+p(parts.m)+'-'+p(parts.d)+' '+p(parts.H)+':'+p(parts.M)+':'+p(Math.floor(parts.S));
     }
-    const m=String(value??'').trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    value=String(value??'').trim().replace(/^(\d{4})年(\d{1,2})月(\d{1,2})日(\d{1,2})时(\d{2})分(\d{2})秒$/, '$1-$2-$3 $4:$5:$6');
+    const m=value.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
     if(!m)throw Error('发布时间需要包含日期和时间');
     const [,y,mo,d,h,mi,se='00']=m,p=n=>String(n).padStart(2,'0');
     const day=y+'-'+p(mo)+'-'+p(d),date=new Date(day+'T00:00:00Z');
@@ -79,13 +101,15 @@
       const sheet=book.Sheets[name];if(!sheet['!ref'])continue;
       const range=XLSX.utils.decode_range(sheet['!fullref']||sheet['!ref']);
       if(range.e.c>63||range.e.r>MAX_ROWS+20)throw Error('每个文件最多支持 2000 条作品、64 列');
-      let head=-1,columns=null;
+      let head=-1,columns=null,adapter=null;
       for(let r=range.s.r;r<=Math.min(range.e.r,19);r++){
         const map=new Map();let duplicate=false;for(let c=range.s.c;c<=range.e.c;c++){const cell=sheet[XLSX.utils.encode_cell({r,c})];if(cell?.v!=null){const key=header(cell.v);if(map.has(key))duplicate=true;map.set(key,c);}}
-        if(map.has('作品名称')&&map.has('发布时间')){if(duplicate)throw Error('工作表中有重复列名，请使用平台原始导出表');head=r;columns=map;break;}
+        const matches=ADAPTERS.filter(a=>map.has(header(a.title))&&map.has(header(a.date)));
+        if(matches.length>1)throw Error('表格混合了多个平台的列，请分别导入');
+        if(matches.length){adapter=matches[0];if(duplicate)throw Error('工作表中有重复列名，请使用平台原始导出表');head=r;columns=map;break;}
       }
       if(head<0)continue;
-      if(!columns.has('播放量'))throw Error('作品列表缺少「播放量」列，请使用创作者中心原始导出表');
+      if(!columns.has(header(adapter.required)))throw Error('作品列表缺少「'+adapter.required+'」列，请使用创作者中心原始导出表');
       const rows=[],errors=[];let count=0;
       for(let r=head+1;r<=range.e.r;r++){
         const get=key=>columns.has(header(key))?sheet[XLSX.utils.encode_cell({r,c:columns.get(header(key))})]:undefined;
@@ -93,32 +117,32 @@
         count++;if(count>MAX_ROWS)throw Error('每个文件最多支持 2000 条作品');
         try{
           for(const c of columns.values())if(sheet[XLSX.utils.encode_cell({r,c})]?.f)throw Error('包含公式，请使用平台原始导出值');
-          const title=String(get('作品名称')?.v??'').trim();if(!title||title.length>4000)throw Error('作品名称为空或超过 4000 字');
-          const published_at=publishTime(get('发布时间'),XLSX,!!book.Workbook?.WBProps?.date1904);
+          const title=String(get(adapter.title)?.v??'').trim();if(!title||title.length>4000)throw Error('作品名称为空或超过 4000 字');
+          const published_at=publishTime(get(adapter.date),XLSX,!!book.Workbook?.WBProps?.date1904);
           const fields={title,publish_date:published_at.slice(0,10)},extra={};
-          for(const [label,[key,type]] of Object.entries(COLUMNS))if(columns.has(header(label))){
+          for(const [label,[key,type]] of Object.entries(adapter.columns))if(columns.has(header(label))){
             let value;try{value=numeric(get(label)?.v,type);}catch(e){throw Error(label+'：'+e.message);}
             if(value!==null)(EXTRA.has(key)?extra:fields)[key]=value;
           }
-          rows.push({line:r+1,fields,source:{provider:'douyin-creator-xlsx',published_at,original_title:title,genre:String(get('体裁')?.v??''),review_status:String(get('审核状态')?.v??''),extra}});
+          rows.push({line:r+1,fields,source:{provider:adapter.provider,published_at,original_title:title,genre:String(get('体裁')?.v??''),review_status:String(get('审核状态')?.v??''),extra}});
         }catch(e){errors.push({line:r+1,message:e.message});}
       }
-      sheets.push({name,rows,errors,count,recognized:[...columns.keys()].filter(k=>Object.keys(COLUMNS).some(l=>header(l)===k))});
+      sheets.push({name,platform:adapter.platform,rows,errors,count,recognized:[...columns.keys()].filter(k=>Object.keys(adapter.columns).some(l=>header(l)===k))});
     }
-    if(sheets.length!==1)throw Error(sheets.length?'发现多个作品列表，请每次仅导入一个工作表':'未找到作品名称、发布时间、播放量，请使用抖音创作者中心「作品列表导出.xlsx」');
+    if(sheets.length!==1)throw Error(sheets.length?'发现多个作品列表，请每次仅导入一个工作表':'未找到支持的作品列表，请使用抖音「作品列表导出.xlsx」或小红书「笔记列表明细表.xlsx」');
     return sheets[0];
   }
   function unpack(note){
-    try{const x=JSON.parse(note);if(x?.tfs_metric_export===1&&x.source?.provider==='douyin-creator-xlsx'&&typeof x.note==='string')return x;}catch{}
+    try{const x=JSON.parse(note);if(x?.tfs_metric_export===1&&ADAPTERS.some(a=>a.provider===x.source?.provider)&&typeof x.note==='string')return x;}catch{}
     return {note:typeof note==='string'?note:'',source:null};
   }
   const pack=(note,source)=>source?JSON.stringify({tfs_metric_export:1,note:note||'',source}):note||null;
-  const identity=source=>JSON.stringify([source?.published_at,norm(source?.original_title)]);
+  const identity=source=>JSON.stringify([source?.provider,source?.published_at,norm(source?.original_title)]);
   function plan(rows,existing,account,mode='skip'){
     if(!account)throw Error('请先选择这份导出表所属的账号');
-    const scoped=existing.filter(r=>r.account===account&&r.platform==='抖音');
     const groups=new Map();rows.forEach(r=>{const k=identity(r.source);groups.set(k,[...(groups.get(k)||[]),r]);});
     return rows.map(row=>{
+      const scoped=existing.filter(r=>r.account===account&&r.platform===platformFor(row.source));
       const key=identity(row.source),duplicates=groups.get(key);
       if(duplicates.length>1){
         const different=duplicates.some(r=>JSON.stringify([r.fields,r.source])!==JSON.stringify([row.fields,row.source]));
@@ -136,11 +160,14 @@
   function payload(row,account,operator){
     const previous=unpack(row.target?.note),source={...row.source,extra:{...previous.source?.extra,...row.source.extra}};
     const empty=row.target?{}:Object.fromEntries(['views','impressions','finish_3s','finish_5s','likes','comments','saves','shares','dms','groupon_clicks','groupon_redeemed','followers_gain'].map(key=>[key,null]));
-    return {...empty,...row.fields,account,platform:'抖音',note:pack(previous.note,source),ops_name:operator};
+    return {...empty,...row.fields,account,platform:platformFor(row.source),note:pack(previous.note,source),ops_name:operator};
   }
   async function commit(rows,{readExisting,write,account,operator,mode='skip',onProgress=()=>{}}){
     let saved=0,skipped=0,conflicts=0;
-    const existing=await readExisting(account);
+    if(!rows.length)return {saved,skipped,conflicts};
+    const platforms=new Set(rows.map(row=>platformFor(row.source)));
+    if(platforms.size!==1)throw Error('请按平台分别导入');
+    const existing=await readExisting(account,[...platforms][0]);
     const fresh=plan(rows,existing,account,mode);
     if(existing.length+fresh.filter(r=>r.action==='insert').length>=1000)throw Error('该账号导入后将达到 1000 条核对上限，请减少本次勾选数量');
     for(const row of fresh){
@@ -152,5 +179,5 @@
     }
     return {saved,skipped,conflicts};
   }
-  return {MAX_BYTES,MAX_ROWS,LABELS,EXTRA,numeric,publishTime,validateZip,parse,unpack,pack,identity,plan,payload,commit};
+  return {MAX_BYTES,MAX_ROWS,LABELS,EXTRA,formatExtra,platformFor,numeric,publishTime,validateZip,parse,unpack,pack,identity,plan,payload,commit};
 });

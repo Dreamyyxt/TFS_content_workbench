@@ -418,7 +418,7 @@ node start-jianying.cjs</code></pre>
       </div>
 
       <section id="metricFilePanel" class="metric-file-panel" aria-label="导入创作者中心数据" hidden>
-        <div class="panel-head"><div><h3>导入作品列表</h3><p class="hint">支持抖音创作者中心原始导出的 .xlsx，包含视频和图文。文件在本机解析，确认后才保存数据。</p></div><button type="button" class="text-button" id="btnCloseMetricFile">收起导入</button></div>
+        <div class="panel-head"><div><h3>导入作品列表</h3><p class="hint">支持抖音「作品列表导出」和小红书「笔记列表明细表」.xlsx，自动识别平台，包含视频和图文。文件在本机解析，确认后才保存数据。</p></div><button type="button" class="text-button" id="btnCloseMetricFile">收起导入</button></div>
         <div class="metric-file-controls">
           <label class="fld"><span>选择导出文件</span><input id="metricFileInput" type="file" accept=".xlsx" /></label>
           <label class="fld"><span>这份表属于哪个账号？</span><select id="metricFileAccount"><option value="">请选择所属账号</option></select></label>
@@ -430,7 +430,7 @@ node start-jianying.cjs</code></pre>
         <div id="metricFilePreview" hidden>
           <p id="metricFileSummary"></p>
           <ul id="metricFileErrors" class="metric-file-errors" hidden></ul>
-          <div class="metric-file-table" role="region" aria-label="Excel 导入预览，可横向滚动" tabindex="0"><table class="dtable"><thead><tr><th><input id="metricFileAll" type="checkbox" aria-label="选择全部可导入作品" /></th><th>行</th><th>作品名称</th><th>发布时间</th><th>体裁</th><th>播放</th><th>完整完播</th><th>5 秒完播</th><th>赞 / 评 / 藏</th><th>处理方式</th></tr></thead><tbody id="metricFileRows"></tbody></table></div>
+          <div class="metric-file-table" role="region" aria-label="Excel 导入预览，可横向滚动" tabindex="0"><table class="dtable"><thead><tr><th><input id="metricFileAll" type="checkbox" aria-label="选择全部可导入作品" /></th><th>行</th><th>作品名称</th><th>发布时间</th><th>体裁</th><th id="metricFileViewsHeading">播放量</th><th id="metricFileMetric1Heading">完整完播</th><th id="metricFileMetric2Heading">5 秒完播</th><th>赞 / 评 / 藏</th><th>处理方式</th></tr></thead><tbody id="metricFileRows"></tbody></table></div>
         </div>
         <div class="form-actions"><button type="button" class="btn btn-ghost" id="btnRefreshMetricFile">重新核对</button><button type="button" class="btn btn-primary" id="btnConfirmMetricFile" disabled>确认导入 0 条</button></div>
       </section>
@@ -456,7 +456,7 @@ node start-jianying.cjs</code></pre>
           <label class="fld"><span>平台</span><select id="mPlatform"><option>抖音</option><option>小红书</option><option>双平台</option></select></label>
           <label class="fld"><span>发布日期</span><input id="mDate" type="date" /></label>
           <label class="fld fld-wide"><span>标题</span><input id="mTitle" type="text" placeholder="发布时用的标题" /></label>
-          <label class="fld"><span>播放量</span><input id="mViews" type="number" min="0" placeholder="未填写" /></label>
+          <label class="fld"><span>播放量 / 观看量</span><input id="mViews" type="number" min="0" placeholder="未填写" /></label>
           <label class="fld"><span>曝光量</span><input id="mImpr" type="number" min="0" placeholder="未填写" /></label>
           <label class="fld"><span>3 秒完播率 %</span><input id="mF3" type="number" step="0.1" min="0" placeholder="未填写" /></label>
           <label class="fld"><span>5 秒完播率 %</span><input id="mF5" type="number" step="0.1" min="0" placeholder="未填写" /></label>
@@ -481,7 +481,7 @@ node start-jianying.cjs</code></pre>
 
     <div class="kpis" id="dataKpis"></div>
     <div class="analytics-grid">
-      <section class="panel"><div class="panel-head"><div><p class="eyebrow">CONTENT REACH</p><h3>作品播放表现</h3></div><span class="chart-note">最近 7 个有记录的发布日期</span></div><div id="dataChart" class="reach-chart"></div></section>
+      <section class="panel"><div class="panel-head"><div><p class="eyebrow">CONTENT REACH</p><h3>作品播放与观看表现</h3></div><span class="chart-note">最近 7 个有记录的发布日期</span></div><div id="dataChart" class="reach-chart"></div></section>
       <section class="panel retention-panel"><p class="eyebrow">FIRST IMPRESSION</p><h3>前 3 秒，留住目光</h3><div id="dataRetention"></div><p class="chart-note">平均 3 秒完播率 · 参考线 40%</p></section>
     </div>
 
@@ -490,14 +490,14 @@ node start-jianying.cjs</code></pre>
         <div><h2>逐条明细</h2>
           <p class="hint">达标线（行业经验值，可用自己账号历史校准）：3 秒完播 ≥40% · 5 秒完播 ≥25% · 商品点击 ≥3%</p>
         </div>
-        <label class="script-account-field"><span>明细排序</span><select id="dataSort"><option value="newest">最近发布</option><option value="views">播放量优先</option><option value="retention">3 秒完播优先</option></select></label>
+        <label class="script-account-field"><span>明细排序</span><select id="dataSort"><option value="newest">最近发布</option><option value="views">播放 / 观看优先</option><option value="retention">3 秒完播优先</option></select></label>
       </div>
       <p class="analytics-table-hint">明细可横向滚动，查看互动、转化与编辑入口。</p>
       <div class="table-wrap" id="dataTable" tabindex="0" role="region" aria-label="作品数据明细，可横向滚动"></div>
     </div>
 
     <div class="panel">
-      <div class="panel-head"><div><h2>选题回溯</h2><p class="hint">按 3 秒完播率排序，播放量用于同分排序；可回看已关联的选题与脚本。</p></div></div>
+      <div class="panel-head"><div><h2>选题回溯</h2><p class="hint">按 3 秒完播率排序，播放或观看量用于同分排序；可回看已关联的选题与脚本。</p></div></div>
       <div class="rank-list" id="dataRank"></div>
     </div>
   </section>
