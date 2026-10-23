@@ -16,6 +16,12 @@ directory    = <仓库>/workbench        （不是仓库根）
 - 发布前必须先 `git fetch` 并确认 `main` 与 `origin/main` 一致，否则会把别人合进来的功能覆盖掉。
 - 完整机制、步骤与排障见 `docs/PUBLISH.md`；发布前置检查跑 `bash tools/publish.sh`。
 
+**自动发布已启用**（`docs/PUBLISH.md` 第六节）：任一电脑 `git push` 后，本机
+`tools/auto-sync.sh` 每 2 分钟拉取 + 体检 + 重启服务，并写入
+`~/.wujiseason/deploy-state.json` 的 `pending`；WorkBuddy 的每小时定时任务读该标记完成上线。
+所以**手动发布前先看状态文件** —— 若已有 `pending`，说明有内容正等着自动上线，
+不要重复发；`status=failed` 则先看 `~/.wujiseason/auto-sync.log` 里的原因。
+
 ---
 
 # 视频制作约定

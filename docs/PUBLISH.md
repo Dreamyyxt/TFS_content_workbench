@@ -159,3 +159,74 @@ for f in server.js access-policy.js; do curl -s -o /dev/null -w "$f %{http_code}
 
 发布只影响**线上那套静态页 + Node 服务**；Mac mini 上的 `127.0.0.1:4191` 制作服务（剪映 / 火山）**不经过发布**，改完代码重启服务即可（`重启制作服务.command`）。
 远程访问（Tailscale）看到的是 `ts.net` 域名直接读磁盘的版本，**永远比线上新**，也不用等发布。
+
+---
+
+## 六、自动发布流水线
+
+目标：**任何一台电脑 `git push`，这台 Mac 自动拉取并上线**，不用人管。
+
+### 为什么分两层
+
+| 环节 | 谁做 | 原因 |
+|---|---|---|
+| 拉代码 → 体检 → 重启服务 | **launchd**（`tools/auto-sync.sh`，每 2 分钟） | 纯本地动作，shell 就能干，快 |
+| 真正发布到线上 | **WorkBuddy 定时任务**（每小时） | 发布接口要 `Access-Token` / `Client-Id` / `Open-Id`，token 由客户端自己刷新 —— 纯 shell 拿不到，也不该硬抄 |
+
+所以是「**本机负责准备好，客户端负责发上去**」，两层用 `~/.wujiseason/deploy-state.json` 交接。
+
+### 数据流
+
+```
+别的电脑 git push
+      ↓  ≤2 分钟
+auto-sync.sh: git fetch → 发现新提交 → git merge --ff-only
+      ↓
+   workbench/ 有改动？
+      ├─ 没有（只动文档/脚本）→ 只更新代码，结束
+      └─ 有 → bash tools/publish.sh --quiet（测试 + 白名单 + 语法）
+                ├─ 不通过 → 记 failed + 弹通知，不上线
+                └─ 通过 → 重启制作服务 → 写 pending(status=ready)
+                              ↓  ≤1 小时
+                   WorkBuddy 定时任务发布 → curl 复核 → 记 lastDeployed
+```
+
+### 安全底线（脚本里写死，不要改）
+
+- 只用 `git merge --ff-only`；**永不** `reset --hard` / `clean` / `stash` / 强推；
+- 有**已跟踪文件**的未提交改动 → 立即跳过并通知（未跟踪文件不阻塞，`merge` 遇到同名会自己拒绝）；
+- 只在 `main` 分支上工作，其他分支一律不动；
+- 同一 commit 只处理一次（`lastProcessed`），不会每 2 分钟重复重启；
+- 体检不通过绝不写 `pending`，坏代码进不了线上。
+
+### 状态文件 `~/.wujiseason/deploy-state.json`
+
+```json
+{
+  "lastProcessed": "已处理过的远端 commit",
+  "lastDeployed":  "已真正上线（到线上）的 commit",
+  "pending": { "commit": "...", "subject": "...", "status": "ready|failed", "note": "..." }
+}
+```
+
+### 日常操作
+
+| 想干什么 | 怎么做 |
+|---|---|
+| 开启 / 停止 | 双击 `安装自动发布.command` / `卸载自动发布.command` |
+| 看现在什么情况 | 双击 `查看自动发布状态.command` |
+| 只想看看会不会动 | `bash tools/auto-sync.sh --dry-run` |
+| 手动催一次 | `bash tools/auto-sync.sh`（立刻同步，发布仍等定时任务） |
+| 跳过自动同步 | 直接改代码不提交即可（有 tracked 改动就暂停）；或卸载 |
+
+### 排障
+
+| 现象 | 原因 / 处理 |
+|---|---|
+| push 了但一直没同步 | 看 `~/.wujiseason/auto-sync.log`；常见是工作区有未提交改动（会弹过一次通知） |
+| 日志报 `fetch 失败` | Mac 断网或 GitHub 不可达；下一轮会重试 |
+| 报「无法快进合并」 | 本地 `main` 有未推送提交、与远端分叉；手工 `git pull --rebase` 或推送后自动恢复 |
+| 体检失败未上线 | 日志里有失败明细；修好后新提交一次即可 |
+| 一直 pending 没发布 | 定时任务没跑或发布失败；状态里 `status=failed` 会带原因 |
+| 完全没反应 | `launchctl print gui/$(id -u)/com.wujiseason.auto-sync` 看是否 loaded |
+
