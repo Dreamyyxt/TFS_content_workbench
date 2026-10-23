@@ -47,5 +47,6 @@
 ## 状态
 线上 = `main`（10-23 21:11 发布，含 PR#12/#13），`index.html` 56,045B。`main` 已合入 `feat/remote-access-tailscale`（远程访问改造随之上线；线上无同源标记，行为不变）。
 **远程访问（Tailscale）**：`tailscale serve --bg 4191` → `https://dreamyyxtmac-mini.tail7079d7.ts.net/`，已实测可用（`ready:true`）。
+**自动发布**：push 后本机 `tools/auto-sync.sh`（LaunchAgent `com.wujiseason.auto-sync`，120s）拉取+体检+重启 → 写 `~/.wujiseason/deploy-state.json` 的 `pending` → 每小时定时任务据此发布。**⚠️ LaunchAgent 待用户双击「安装自动发布.command」加载（`launchctl bootstrap` 恒 EIO）**。手动发布前先看 `pending`，别重复发。
 `tools/publish.sh` 与 `docs/PUBLISH.md` 已按真实机制重写（2026-10-23）。剩余：编辑页偶发 `ERR_FILE_NOT_FOUND` 未解释；手机链路仍走 DERP 中继（需路由器 UPnP 或同 Wi-Fi）。
 **约定：新功能一律新开分支做，别直接动 `main`。**
