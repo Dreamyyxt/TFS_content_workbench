@@ -5,9 +5,11 @@
 
 ## 身份与发布
 - appId `wbapp_OVXOIXh914a31yrMdLVAOD` → 域名 `nail-content-workbench`；sandboxId `60f3c6123d374dcda7932707077e087f`；deployTargetId(主目录) `a4663c044ef6b973`；远端 `git@github.com:Dreamyyxt/TFS_content_workbench.git`。`~/WorkBuddy/2026-10-05-12-31-27` 只是本对话 cwd 空壳，**别删**。
-- `deployTargetId = sha256(path.resolve(dir)).slice(0,16)`；绑定表 `~/.workbuddy/cloudstudio-deploy-history/*.json`，只比 `absolutePath`；`findDeployDestination` 里 **`appId` 优先级最高** → **从主目录普通发布即命中同一应用，不必再传 appId**。`.genie` 不参与 sites 发布判定（且写在**当前会话根**而非 `directory`）。
-- 发布前：**全新实例** `PORT=4199 node server.js` 体检（curl 完 `index.html` 所有 `./xxx` 应全 200、`/server.js` 404）—— ⚠️ **别拿常驻 4191 当基准**，其 `STATIC_FILES` 白名单在内存里、可能比磁盘旧；再跑 `node --test tests/*.test.cjs`（`node --test tests/` 会 MODULE_NOT_FOUND）。
-- 发布：`directory=.../workbench`、`domainPrefix=nail-content-workbench`、`appName=第五季内容工作台`、`userAskedToPublish=true`。**新增前端脚本必须加 `STATIC_FILES` 白名单**（`.css` 例外）。
+- `deployTargetId = sha256(path.resolve(dir)).slice(0,16)`；绑定表 `~/.workbuddy/cloudstudio-deploy-history/*.json`，只比 `absolutePath`（**逐字符相同**，Windows 才做 inode 兜底）。
+- **发布目标由「是否显式传 `appId`」决定，不由 git 决定**（源码 `findDeployDestination` / `deploySite` 已核）：传了 `appId` → 直接 `existing-application`，**不要求本机有记录**；没传 → 只看本机部署历史，没记录就 `new-application`（**新建应用 → 数字后缀域名**）。工具层还有 `checkApplicationAvailable` 校验，不可用会报错而非闷声新建。
+- ⇒ **任何电脑发布都必须显式带 `appId`**（`AGENTS.md` 顶部已写死参数）。`appId` 存在云端，git 只同步代码、不同步应用归属；`.genie` 标记与部署历史都是本机状态。
+- 发布前：`git fetch` 确认 `main` 与 `origin/main` 一致（曾据此发现本地落后 PR#12，否则会覆盖别人功能）；`bash tools/publish.sh` 一键体检（git 同步/测试/白名单/语法/线上现状）；需要时再用**全新实例** `PORT=4199 node server.js` 逐资源体检 —— ⚠️ **别拿常驻 4191 当基准**，其 `STATIC_FILES` 白名单在内存里、可能比磁盘旧。
+- 发布：`directory=.../workbench`（**工程源本身，不再走 rsync 镜像**）、`appId`、`domainPrefix=nail-content-workbench`、`appName=第五季内容工作台`、`language=node`、`userAskedToPublish=true`。**新增前端脚本必须加 `STATIC_FILES` 白名单**（`.css` 例外；`publish.sh` 会检查）。
 - 换域名要改 6 处硬编码：`jianying-api.js:10` `WEB_ORIGIN`（不改→视频制作 403）、`app.js:13`、`server.js:1335/1337`、`server.js:1347`、`tools/push-trend.py:30/32`、`tools/make-preview.py:11`；且 **localStorage 按 origin 隔离** → 密钥/设置全重配。
 
 ## 本机服务与远程访问（三道闸门）
@@ -43,7 +45,7 @@
 `tools/archive-assets.cjs` + 双击 `归档素材到NAS.command`（**工程侧，不在 `workbench/` 内**）。NAS `192.168.0.49` → `/Volumes/家庭共享/第五季美甲美睫/`；只复制、幂等、末尾写 `_工作台快照/`。**`state.json` 绝不能放网络卷**（需原子 rename）；剪映草稿按绝对路径引素材，素材不能放网络卷。挂载检测 `fs.statSync(p).dev !== fs.statSync(dirname).dev`。路线 = **本地满配换速度 + 每日归档兜底**，不做整份镜像。
 
 ## 状态
-线上 = `main`（10-16 15:22，含 PR#11），`index.html` sha256 `a6d4d0c3d465fa54`。**launchd 自启已装好并运行（16:10）**。
-**远程访问（Tailscale）已实现并本地验证通过**，在分支 `feat/remote-access-tailscale`（**未合并、未发布**）。
-剩余：`publish.sh`/`PUBLISH.md` 旧流程待改写；编辑页偶发 `ERR_FILE_NOT_FOUND` 未解释。
+线上 = `main`（10-23 21:11 发布，含 PR#12/#13），`index.html` 56,045B。`main` 已合入 `feat/remote-access-tailscale`（远程访问改造随之上线；线上无同源标记，行为不变）。
+**远程访问（Tailscale）**：`tailscale serve --bg 4191` → `https://dreamyyxtmac-mini.tail7079d7.ts.net/`，已实测可用（`ready:true`）。
+`tools/publish.sh` 与 `docs/PUBLISH.md` 已按真实机制重写（2026-10-23）。剩余：编辑页偶发 `ERR_FILE_NOT_FOUND` 未解释；手机链路仍走 DERP 中继（需路由器 UPnP 或同 Wi-Fi）。
 **约定：新功能一律新开分支做，别直接动 `main`。**

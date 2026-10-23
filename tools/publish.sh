@@ -1,140 +1,167 @@
 #!/bin/bash
-# 工作台一键发布前置 —— 体检 + 同步镜像 + 复核
+# 工作台发布前置检查（只检查，不改文件、不发布）
 #
 # 用法：
-#   bash tools/publish.sh              # 体检 + 同步 + 复核
-#   bash tools/publish.sh --check-only # 只做回退体检，不动文件
-#   bash tools/publish.sh --force      # 体检发现问题也继续同步（慎用）
+#   bash tools/publish.sh          # 全量体检
+#   bash tools/publish.sh --quiet  # 只报错，不打印明细
 #
-# 说明与完整流程见 docs/PUBLISH.md
+# 检查完把下面「发布参数」整段交给助手即可。机制与步骤见 docs/PUBLISH.md。
 #
-# 路径约定：
-#   工程源   = 本脚本所在仓库的 workbench/ （自动探测，换机后无需改）
-#   发布镜像 = 默认 /Users/dreamyyxt/WorkBuddy/2026-10-05-12-31-27/workbench
-#              —— 这条路径是「正式域名的锚点」，改掉会丢应用绑定，故写成固定默认值。
-#              换机器可用环境变量覆盖：PUBLISH_MIRROR_ROOT=/path/to/2026-10-05-12-31-27
+# 历史提醒：旧版脚本会把 workbench/ rsync 到 /Users/…/2026-10-05-12-31-27/workbench
+# 这个「发布镜像」。该镜像已废弃（目录已清空），这条同步会让线上静默回退，故移除。
 
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="$REPO_ROOT/workbench"
-MIRROR_ROOT="${PUBLISH_MIRROR_ROOT:-/Users/dreamyyxt/WorkBuddy/2026-10-05-12-31-27}"
-DST="$MIRROR_ROOT/workbench"
 
-EXCLUDES=(--exclude='.DS_Store' --exclude='__pycache__' --exclude='*.pyc' --exclude='_sample')
+APP_ID="wbapp_OVXOIXh914a31yrMdLVAOD"
+DOMAIN_PREFIX="nail-content-workbench"
+APP_NAME="第五季内容工作台"
+SITE="https://nail-content-workbench.app.workbuddy.host"
 
-CHECK_ONLY=0
-FORCE=0
+QUIET=0
 for arg in "$@"; do
   case "$arg" in
-    --check-only) CHECK_ONLY=1 ;;
-    --force)      FORCE=1 ;;
-    -h|--help)    sed -n '2,20p' "$0"; exit 0 ;;
+    --quiet) QUIET=1 ;;
+    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
     *) echo "未知参数：$arg"; exit 2 ;;
   esac
 done
 
-red()  { printf "\033[31m%s\033[0m\n" "$1"; }
-grn()  { printf "\033[32m%s\033[0m\n" "$1"; }
-yel()  { printf "\033[33m%s\033[0m\n" "$1"; }
+red() { printf "\033[31m%s\033[0m\n" "$1"; }
+grn() { printf "\033[32m%s\033[0m\n" "$1"; }
+yel() { printf "\033[33m%s\033[0m\n" "$1"; }
+say() { [ "$QUIET" -eq 1 ] || echo "$1"; }
 
-echo "工程源  ：$SRC"
-echo "发布镜像：$DST"
-echo
+FAIL=0
+WARN=0
+
+[ "$QUIET" -eq 1 ] || echo "工程目录：$SRC"
+[ "$QUIET" -eq 1 ] || echo "线上应用：${APP_NAME}（${APP_ID}）"
+[ "$QUIET" -eq 1 ] || echo
 
 if [ ! -f "$SRC/server.js" ]; then
-  red "❌ 找不到工程源：$SRC/server.js"
+  red "❌ 找不到 $SRC/server.js"
   exit 1
 fi
 
-# ── 1. 回退体检：镜像里有、源里没有的文件 = 源侧回退了 ──────────────
-# 必须放在同步之前做：一旦同步，--delete 就会把这些文件真的删掉，线上静默回退。
-echo "── 1/3 回退体检 ─────────────────────────────"
-if [ ! -d "$DST" ]; then
-  yel "⚠️  发布镜像尚不存在（首次发布？），跳过体检。"
-  DELETIONS=""
-else
-  # -8/--8-bit-output：让 rsync 原样输出中日韩文件名，不要转义成 \#232 这种八进制
-  DELETIONS="$(rsync -a --delete --dry-run --itemize-changes --8-bit-output "${EXCLUDES[@]}" "$SRC/" "$DST/" 2>/dev/null | grep '^\*deleting' || true)"
+# ── 1. git 同步状态 ───────────────────────────────────────────
+[ "$QUIET" -eq 1 ] || echo "── 1/5 git 同步 ─────────────────────────────"
+BRANCH="$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null)"
+if [ "$BRANCH" != "main" ]; then
+  yel "⚠️  当前分支是 ${BRANCH}（不是 main）"
+  WARN=$((WARN+1))
 fi
 
-if [ -n "$DELETIONS" ]; then
-  red "❌ 检测到「镜像有、源没有」的文件 —— 当前分支很可能回退了："
-  echo "$DELETIONS" | sed 's/^\*deleting[[:space:]]*/    /' | sed 's/^/  /'
-  echo
-  yel "  直接同步会让线上静默丢掉这些能力。请先确认分支："
-  yel "    git -C \"$REPO_ROOT\" status --short --branch"
-  yel "    git -C \"$REPO_ROOT\" log --oneline -5"
-  if [ "$FORCE" -ne 1 ]; then
-    red "已中止（确要继续请加 --force）。"
-    exit 1
-  fi
-  yel "  已指定 --force，继续。"
-else
-  grn "✅ 无回退信号。"
-fi
-
-if [ "$CHECK_ONLY" -eq 1 ]; then
-  echo
-  grn "仅体检模式结束。"
-  exit 0
-fi
-
-# ── 2. 同步镜像 ────────────────────────────────────────────────
-echo
-echo "── 2/3 同步发布镜像 ─────────────────────────"
-mkdir -p "$DST"
-rsync -a --delete "${EXCLUDES[@]}" "$SRC/" "$DST/" || { red "❌ rsync 失败"; exit 1; }
-grn "✅ 镜像已同步。"
-
-# ── 3. 复核：关键文件一致 + 语法检查 ───────────────────────────
-echo
-echo "── 3/3 一致性复核 ───────────────────────────"
-
-KEY_FILES=(server.js index.html app.js styles.css studio.css edit-plan.js jy-catalog.js jianying-studio.js)
-FAIL=0
-for f in "${KEY_FILES[@]}"; do
-  [ -f "$SRC/$f" ] || continue
-  a="$(shasum -a 256 "$SRC/$f" | cut -d' ' -f1)"
-  b="$(shasum -a 256 "$DST/$f" | cut -d' ' -f1)"
-  if [ "$a" = "$b" ]; then
-    printf "  %-22s %s\n" "$f" "一致"
-  else
-    printf "  %-22s %s\n" "$f" "不一致"
+if git -C "$REPO_ROOT" rev-parse --verify -q origin/main >/dev/null 2>&1; then
+  AHEAD_BEHIND="$(git -C "$REPO_ROOT" rev-list --left-right --count main...origin/main 2>/dev/null)"
+  AHEAD="$(echo "$AHEAD_BEHIND" | awk '{print $1}')"
+  BEHIND="$(echo "$AHEAD_BEHIND" | awk '{print $2}')"
+  if [ "${BEHIND:-0}" != "0" ]; then
+    red "❌ 本地 main 落后 origin/main $BEHIND 个提交 —— 直接发布会把别人的改动覆盖掉"
+    red "   先执行：git fetch origin && git merge origin/main"
     FAIL=1
+  elif [ "${AHEAD:-0}" != "0" ]; then
+    yel "⚠️  本地 main 领先 origin/main $AHEAD 个提交（未推送）"
+    WARN=$((WARN+1))
+  else
+    say "✅ main 与 origin/main 一致"
   fi
-done
+  if ! git -C "$REPO_ROOT" diff --quiet; then
+    yel "⚠️  工作区有未提交改动（发布会带上磁盘上的内容，而不是 git 内容）"
+    WARN=$((WARN+1))
+  fi
+else
+  yel "⚠️  没有 origin/main 引用，跳过同步检查"
+  WARN=$((WARN+1))
+fi
 
+# ── 2. 测试 ───────────────────────────────────────────────────
+[ "$QUIET" -eq 1 ] || echo
+[ "$QUIET" -eq 1 ] || echo "── 2/5 测试 ─────────────────────────────────"
 NODE_BIN="$(command -v node || true)"
 [ -x "/Users/dreamyyxt/.workbuddy/binaries/node/versions/22.22.2-6/bin/node" ] && \
   NODE_BIN="/Users/dreamyyxt/.workbuddy/binaries/node/versions/22.22.2-6/bin/node"
-
-if [ -n "$NODE_BIN" ]; then
-  while IFS= read -r js; do
-    if ! "$NODE_BIN" --check "$js" >/dev/null 2>&1; then
-      red "  语法错误：${js#$DST/}"
-      FAIL=1
-    fi
-  done < <(find "$DST" -maxdepth 2 -name '*.js' -not -path '*/node_modules/*' -not -path '*/__pycache__/*')
-  [ "$FAIL" -eq 0 ] && grn "✅ 前端脚本语法检查通过。"
+if [ -z "$NODE_BIN" ]; then
+  red "❌ 找不到 node"
+  exit 1
+fi
+TEST_OUT="$(cd "$SRC" && "$NODE_BIN" --test tests/*.test.cjs 2>&1)"
+TEST_SUM="$(echo "$TEST_OUT" | grep -E '^# (pass|fail)' | tr '\n' ' ')"
+if echo "$TEST_OUT" | grep -qE '^# fail 0'; then
+  say "✅ $TEST_SUM"
 else
-  yel "⚠️  未找到 node，跳过语法检查。"
+  red "❌ 测试未通过：$TEST_SUM"
+  echo "$TEST_OUT" | grep -A 20 '^not ok' | head -30
+  FAIL=1
 fi
 
+# ── 3. 静态白名单 ─────────────────────────────────────────────
+# index.html 引用的每个 ./x.js 都必须在 server.js 的 STATIC_FILES 里，
+# 否则线上 404、页面静默少功能。
+[ "$QUIET" -eq 1 ] || echo
+[ "$QUIET" -eq 1 ] || echo "── 3/5 前端脚本白名单 ───────────────────────"
+MISSING=""
+for f in $(grep -oE '\./[a-zA-Z0-9._-]+\.js' "$SRC/index.html" | sed 's|^\./||' | sort -u); do
+  if ! grep -q "'/$f'" "$SRC/server.js"; then
+    MISSING="$MISSING $f"
+  fi
+done
+if [ -n "$MISSING" ]; then
+  red "❌ 这些前端脚本没有登记进 server.js 的 STATIC_FILES：$MISSING"
+  red "   线上会 404 并静默缺功能。"
+  FAIL=1
+else
+  say "✅ index.html 引用的脚本都已登记"
+fi
+
+# ── 4. 语法 ───────────────────────────────────────────────────
+[ "$QUIET" -eq 1 ] || echo
+[ "$QUIET" -eq 1 ] || echo "── 4/5 语法检查 ─────────────────────────────"
+BAD=""
+for f in "$SRC"/*.js; do
+  "$NODE_BIN" --check "$f" >/dev/null 2>&1 || BAD="$BAD $(basename "$f")"
+done
+if [ -n "$BAD" ]; then
+  red "❌ 语法错误：$BAD"
+  FAIL=1
+else
+  say "✅ 全部 .js 语法通过"
+fi
+
+# ── 5. 线上现状 ───────────────────────────────────────────────
+[ "$QUIET" -eq 1 ] || echo
+[ "$QUIET" -eq 1 ] || echo "── 5/5 线上现状 ─────────────────────────────"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$SITE/" || echo 000)"
+if [ "$CODE" = "200" ]; then
+  say "✅ 线上可访问（${CODE}）"
+else
+  yel "⚠️  线上首页返回 ${CODE}（发布后再复核）"
+  WARN=$((WARN+1))
+fi
+
+# ── 结论 + 发布参数 ───────────────────────────────────────────
+echo
 if [ "$FAIL" -ne 0 ]; then
-  red "❌ 复核未通过，请修好再发布。"
+  red "❌ 体检未通过，请修好再发布。"
   exit 1
 fi
 
-# ── 下一步 ────────────────────────────────────────────────────
+if [ "$WARN" -ne 0 ]; then
+  yel "⚠️  有 $WARN 条提醒，可继续。"
+fi
+grn "✅ 体检通过。"
 echo
-grn "✅ 前置全部通过。"
-echo
-echo "下一步：让助手从这里发布（参数固定）"
-echo "  directory    = $DST"
-echo "  domainPrefix = nail-content-workbench"
-echo "  appName      = 第五季内容工作台"
+echo "发布参数（交给助手，参数固定）："
+echo "  directory    = $SRC"
+echo "  appId        = $APP_ID        ← 必须带，否则会在别的机器上新建应用"
+echo "  domainPrefix = $DOMAIN_PREFIX"
+echo "  appName      = $APP_NAME"
+echo "  language     = node"
 echo
 echo "发布后复核："
-echo "  curl -sI https://nail-content-workbench.app.workbuddy.host/            # 期望 200"
-echo "  curl -sI https://nail-content-workbench.app.workbuddy.host/server.js   # 期望 404"
+echo "  curl -sI $SITE/ | head -1                                  # 200"
+echo "  curl -s  $SITE/api/health                                  # ok:true"
+echo "  curl -s  $SITE/ | grep -c wj-local-service                 # 0"
+echo "  curl -s -o /dev/null -w '%{http_code}\\n' $SITE/server.js  # 404"

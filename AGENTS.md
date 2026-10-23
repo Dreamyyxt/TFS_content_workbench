@@ -1,3 +1,23 @@
+# 发布约定（先读这条，否则会建出第二个域名）
+
+本仓库的线上应用是**固定的一个**，发布到它必须显式指定 `appId`：
+
+```
+appId        = wbapp_OVXOIXh914a31yrMdLVAOD
+domainPrefix = nail-content-workbench
+appName      = 第五季内容工作台
+directory    = <仓库>/workbench        （不是仓库根）
+线上地址      = https://nail-content-workbench.app.workbuddy.host/
+```
+
+- 应用归属由**本机状态**决定（`.wbapp_<appId>.genie` 标记、`~/.workbuddy/cloudstudio-deploy-history/`、目录绝对路径），**git 不携带这些**。
+- 所以在另一台电脑上、不传 `appId` 直接发布 = 工具认为"从没发布过" = **新建应用 + 数字后缀域名**。
+- 任何电脑上发布都请**显式传 `appId`**（工具会校验该应用可用，不可用就报错，不会静默新建）。
+- 发布前必须先 `git fetch` 并确认 `main` 与 `origin/main` 一致，否则会把别人合进来的功能覆盖掉。
+- 完整机制、步骤与排障见 `docs/PUBLISH.md`；发布前置检查跑 `bash tools/publish.sh`。
+
+---
+
 # 视频制作约定
 
 用户已明确撤销自建 FFmpeg 成片流水线。视频剪辑使用指定的上游 Skill：  

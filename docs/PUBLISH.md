@@ -1,166 +1,161 @@
 # 线上发布说明
 
-本工作台的线上地址：<https://nail-content-workbench.app.workbuddy.host>
+线上地址：<https://nail-content-workbench.app.workbuddy.host>
+
+**一句话：发布到哪个应用，不由 git 决定，由「发布时传入的 appId」决定。**
+不传 appId，工具就只能靠**本机状态**猜；猜不到就新建一个应用，域名因此多出数字后缀。
 
 ---
 
-## 一、先看这一条：域名是「应用」的，应用是「本机目录」的
+## 一、为什么"换个电脑域名就变了"
 
-发布不是「把代码推到一个固定网址」，而是三段链路：
+### 应用身份的四个锚点，全部只在本机
 
-```
-本机绝对目录路径  ──绑定──▶  应用 appId  ──持有──▶  域名
-/Users/…/workbench           wbapp_OVXOIX…          nail-content-workbench
-```
-
-绑定记录写在本机的一个隐藏标记文件里：
-
-```yaml
-# .wbapp_OVXOIXh914a31yrMdLVAOD.genie
-appId: wbapp_OVXOIXh914a31yrMdLVAOD
-name: 第五季内容工作台
-localDir: /Users/dreamyyxt/WorkBuddy/2026-10-05-12-31-27/workbench
-appType: web
-```
-
-发布工具拿到 `directory` 参数后：
-
-1. 在**该目录或其父目录**里找 `.wbapp_*.genie`，按 `localDir` 反查「这个目录属于哪个已有应用」；
-2. 找到了 → **覆盖式发布**，链接与名字都不变；
-3. 找不到 → **新建一个应用**，此时才用得上 `domainPrefix` 去申请域名首段。
-
-**关键：这个标记文件是纯本机状态，不在 git 里，也不跟着 git 走。**
-
-所以换一台电脑（或换一个克隆路径）= 没有绑定记录 = 工具认为「这个目录还没发布过」= 新建应用。
-新建时你想申请的 `nail-content-workbench` 已经被原应用占着，云端只能自动退让成带数字后缀的域名（例如 `nail-content-workbench-62859`）。
-
-> 这不是流程写错了，是机制决定的：**一张机器一张皮**。
-> 发布工具也没有「指定发布到某个已有 appId」的参数 —— 目的地完全由 `directory` 决定。
-
----
-
-## 二、直接后果：不同电脑会得到不同域名
-
-| 从哪台机器的哪个目录发布 | 命中标记 | 结果域名 |
+| 锚点 | 位置 | git 携带 |
 |---|---|---|
-| 本机 Mac mini<br>`/Users/dreamyyxt/WorkBuddy/2026-10-05-12-31-27/workbench` | `wbapp_OVXOIXh914a31yrMdLVAOD` | ✅ `nail-content-workbench`（正式） |
-| 本机 Mac mini<br>`/Users/dreamyyxt/WorkBuddy/第五季内容工作台/workbench` | `wbapp_zMs8T7o28tKQ2wwcncUult` | ⚠️ `nail-content-workbench-62859`（域名不在云端白名单，数据全读不出） |
+| `.wbapp_<appId>.genie` 标记文件（含 `appId` / `localDir`） | 工作区根目录或工程目录 | ❌ 被 `.gitignore` 排除 |
+| 部署历史记录 | `~/.workbuddy/cloudstudio-deploy-history/*.json` | ❌ 在用户目录 |
+| 目录身份 `deployTargetId` | 部署目录**绝对路径**的 sha256 前 16 位 | ❌ 换机路径就变 |
+| 应用与域名的绑定 | 云端（可按 `appId` 查） | ✅ 唯一在云上的东西 |
+
+也就是说：**git 只同步代码，不同步"这份代码属于哪个应用"。**
+
+### 工具是怎么决定往哪儿发的（源码事实）
+
+发布工具在 `findDeployDestination()` 里按这个顺序判断：
+
+1. 传了 `appId` → 直接用这个应用（`existing-application`，**不要求本机有任何记录**）；
+2. 没传 `appId` → 找**本机部署历史**里路径相同的记录：
+   - 有记录且有 `appId` → 用记录里的应用；
+   - 完全没记录 → `new-application` → **新建应用**。
+
+配套事实：
+
+- 路径比较用 `createDeployDirectoryComparer()`：**绝对路径逐字符相同**才算同一目录（只有 Windows 才做大小写 / inode 兜底）；
+- `listApplicationsByDirectory()` 只读 `~/.workbuddy/cloudstudio-deploy-history/`，**不读远端**；
+- `deploySite()` 里 `appId` 一旦传入，就**跳过**全部目录推断；
+- 工具层还会调 `checkApplicationAvailable(appId)`：应用不可用时**直接报错**，不会退回新建。
+
+### 于是有了这三种结果
+
+| 在哪发布 | 本机有没有标记/历史 | 结果 |
+|---|---|---|
+| Mac mini（本机，当前路径） | 有 | ✅ `nail-content-workbench`（正式域名） |
+| 同一台机器、但换了目录（如 `/Users/…/第五季内容工作台/workbench`） | 有**另一套** | ⚠️ 第二个应用 → `nail-content-workbench-62859` |
 | 另一台电脑（任意路径） | 无 | 🆕 新建应用 → 又一个数字域名 |
 
-第三条就是「换电脑发布后 URL 变成数字」的根因。
-
-### 为什么 `-62859` 那个域名是坏的
-
-即使能打开，`-62859` 这个 Origin 不被授权，页面会静默读不出素材库 / 脚本 / 排期 / 风向等数据，
-表现为「整体空白但没报错」。**这不是可以长期用的域名。**
+> `-62859` 这类域名**不能长期用**：它的 Origin 不在云端白名单里，页面会静默读不出素材库 / 脚本 / 排期，表现为"整体空白但不报错"。
 
 ---
 
-## 三、统一发布流程（每台机器、每次发布都照这个走）
+## 二、在不同电脑发布同一个应用：三条路
 
-### 0. 约定固定的两条路径
+### 路线 A：单发布机（推荐，最省事）
 
-| 角色 | 路径 | 能否改 |
-|---|---|---|
-| 工程源（git 仓库，唯一真源） | `/Users/dreamyyxt/WorkBuddy/第五季内容工作台/workbench` | 换机后可改，但**本机要固定** |
-| 发布镜像（自动生成，勿手改） | `/Users/dreamyyxt/WorkBuddy/2026-10-05-12-31-27/workbench` | **不要改**，正式域名绑在这里 |
-| 线上域名 | `nail-content-workbench`（`domainPrefix`） | 不要改 |
-
-> 镜像路径看着像临时目录，其实是**历史遗留的域名锚点**。它在 2026-10-09 工程改名搬迁前就是发布源，
-> 改掉它等于丢掉 `wbapp_OVXOIXh914a31yrMdLVAOD` 这条绑定。
-
-### 1. 一键前置检查 + 同步镜像
+只有一台机器负责发布，其余机器只 `git push`。
 
 ```sh
-cd <仓库根>
+# 开发机
+git add -A && git commit -m "..." && git push
+
+# 发布机（Mac mini）
+git pull && bash tools/publish.sh   # 体检
+# 再让助手用第三节的参数发布
+```
+
+代价：非发布机看不到线上效果。收益：域名永远唯一，绝不会建出影子应用。
+
+### 路线 B：任意机器发布，但**显式传 appId**（技术上完全支持）
+
+在另一台电脑上发布时，参数里必须带：
+
+```
+appId        = wbapp_OVXOIXh914a31yrMdLVAOD
+domainPrefix = nail-content-workbench
+appName      = 第五季内容工作台
+directory    = <该机器上仓库的绝对路径>/workbench
+```
+
+即使那台机器没有任何部署历史，工具也会按 `appId` 找到应用、沿用原域名与 sandbox。
+这是唯一"换机不变域名"的**受支持**做法。`appId` 已写进 `AGENTS.md`，任何助手都读得到。
+
+> 前提：用同一个 WorkBuddy 账号登录（应用归属该账号），且该应用未被删除。
+
+### 路线 C：手工搬运 `.genie` 标记（不推荐）
+
+把 `.wbapp_OVXOIXh914a31yrMdLVAOD.genie` 拷到新机器、把 `localDir` 改成新路径，再让工具靠"目录/祖先目录里的标记"自动认出应用。
+可行，但依赖未公开的内部查找顺序，且一旦 `localDir` 写错就可能覆盖到别的应用。**有路线 A/B 就别用这条。**
+
+---
+
+## 三、标准发布步骤（本机）
+
+### 1. 先同步，再看清要发什么
+
+```sh
+cd ~/Projects/TFS_content_workbench
+git fetch origin
+git status --short --branch
+git rev-list --left-right --count main...origin/main   # 应为 0  0
+```
+
+**这一步不能省**：本地仓库可能落后远端若干提交（曾经因此差点把已合并的 PR 覆盖掉）。
+
+### 2. 前置检查
+
+```sh
 bash tools/publish.sh
 ```
 
-脚本做四件事：
+脚本做五件事：
 
-1. **回退体检**：逐文件比对源与镜像。发现「镜像有、源没有」的文件 → **中止并告警**
-   （说明当前分支切掉了在别的分支才有的文件，直接同步会让线上静默回退）。
-2. 同步镜像（`rsync -a --delete`，排除 `.DS_Store` / `__pycache__` / 样本目录）。
-3. **一致性复核**：关键文件 sha256 源镜像一致 + `node --check` 语法检查。
-4. 打印下一步。
+1. 校验 `main` 是否与 `origin/main` 一致（落后/领先都提示）；
+2. 跑全部 JS 测试；
+3. 校验 `index.html` 引用的每个前端 `.js` 都在 `server.js` 的 `STATIC_FILES` 白名单里（漏登记 = 线上 404、功能静默缺失）；
+4. 打印本次发布的固定参数；
+5. 提示发布后要复核的 URL。
 
-### 2. 跑测试
+### 3. 发布
 
-```sh
-node --test workbench/tests/*.test.cjs                 # JS
-python3 -m unittest discover -s scripts -p 'test_jianying*.py'   # Python 剪辑
-```
+让助手调用发布能力，参数固定：
 
-> 注意：`node --test tests/` 会 MODULE_NOT_FOUND，必须用 `*.test.cjs` 通配。
+| 参数 | 值 |
+|---|---|
+| `directory` | `<仓库>/workbench`（**工程源目录本身**，不是仓库根，也不再走 rsync 镜像） |
+| `appId` | `wbapp_OVXOIXh914a31yrMdLVAOD` |
+| `domainPrefix` | `nail-content-workbench` |
+| `appName` | `第五季内容工作台` |
+| `language` | `node` |
 
-### 3. 从「发布镜像」目录发布
-
-让助手调用发布，参数固定：
-
-- `directory` = `/Users/dreamyyxt/WorkBuddy/2026-10-05-12-31-27/workbench`（**镜像路径，不是工程源路径**）
-- `domainPrefix` = `nail-content-workbench`
-- `appName` = `第五季内容工作台`（仅首次建应用时生效）
+`directory` 必须是 `workbench/`：`server.js` 的静态白名单和源码屏蔽都以它为根；传仓库根会把 `.jianying-data`、`outputs` 一起传上去。
 
 ### 4. 发布后复核
 
 ```sh
-curl -sI https://nail-content-workbench.app.workbuddy.host/            # 200
-curl -sI https://nail-content-workbench.app.workbuddy.host/server.js   # 404（源码被屏蔽）
+B=https://nail-content-workbench.app.workbuddy.host
+curl -sI $B/ | head -1                       # 200
+curl -s $B/api/health                        # {"ok":true,...}
+curl -s $B/ | grep -c 'wj-local-service'     # 0（线上不应带本机同源标记）
+for f in server.js access-policy.js; do curl -s -o /dev/null -w "$f %{http_code}\n" $B/$f; done   # 404
 ```
 
-再用脚本逐项复核线上资源与镜像 sha256 是否一致（`index.html`、`app.js`、`studio.css`、`jy-catalog.js` …）。
-
-### 5. 新增前端脚本时，别忘了白名单
-
-`workbench/server.js` 里的 `STATIC_FILES` 是白名单，`SRC_EXT_RE` 屏蔽源码。
-**新增的任何前端 `.js` 必须加进 `STATIC_FILES`**，否则线上 404、页面静默少功能。
-（`.css` 不在 `SRC_EXT_RE` 里，不加也能访问，但按约定一律登记。）
+再抽查本次改动的文件是否真的上了线（例如 `curl -s $B/jianying-studio.js | grep -c uploadTimeout`）。
 
 ---
 
-## 四、域名统一策略：二选一
+## 四、常踩的坑
 
-### 策略 A：单一发布机（推荐）
-
-- **只有一台机器负责发布**（现在就是这台 Mac mini）。
-- 其他电脑只做开发：改完 → `git push`。
-- 发布机 `git pull` → `bash tools/publish.sh` → 发布。
-- 结果：域名永远唯一且稳定，不会再有数字域名。
-- 代价：非发布机不能自己验线上效果，得等发布机走一趟。
-
-### 策略 B：多机各自域名
-
-- 每台机器保留自己的应用与域名，互不干扰。
-- 每台机器**必须在自己的 `~/.zshrc` 或本地笔记里记死**：本机用的是哪个 `domainPrefix`、哪个镜像路径。
-- 结果：调试灵活，但线上会存在多个链接，且新机器的域名大概率带数字后缀（可能不在云端白名单，数据读不出）。
-- 代价：容易出现「以为在看正式站点、其实在看一个读不出数据的影子站」的事故。
-
-> 不推荐用「手工把 `.wbapp_OVXOIX…genie` 拷到新机器并改 `localDir`」来强行复用同一域名 ——
-> 这是未经官方支持的野路子，行为不可预期，且一旦绑错会覆盖正式线上。
-
----
-
-## 五、故障排查
-
-| 症状 | 根因 | 处理 |
+| 现象 | 原因 | 处理 |
 |---|---|---|
-| URL 变成 `xxx-数字` | 从没有绑定记录的目录/机器发布，新建了应用 | 回到镜像路径重新发布，并在设置—数据管理—应用里下线数字应用 |
-| 页面能打开但数据全空、控制台 403 `origin is not allowed` | 用了非白名单域名（数字后缀那个） | 换回 `nail-content-workbench` 正式域名 |
-| 线上某个 JS 404 / 功能静默消失 | 新脚本没进 `STATIC_FILES` 白名单 | 补白名单 → 重新同步 → 重新发布 |
-| 线上整体回退到旧版 | 发布前没做回退体检，分支切掉了文件 | `bash tools/publish.sh` 会拦截；已发生则 `git checkout` 回正确分支重发 |
-| 线上源码能被下载 | 发布时用了非镜像目录，或 `SRC_EXT_RE` 被改坏 | 确认从镜像目录发布；`/server.js` 应返回 404 |
+| 域名多了数字后缀 | 发布时没带 `appId`，且本机无部署记录 | 带 `appId` 重发；旧的多余应用去「设置—数据管理—应用」删掉 |
+| 线上少功能、但页面能开 | 新前端 `.js` 没加进 `STATIC_FILES` | 补白名单再发（`tools/publish.sh` 会检查） |
+| 发布后功能回退 | 本地 `main` 落后远端 | `git fetch` → 合并 → 重跑测试 → 再发 |
+| 页面空白、数据读不出 | 用了 `-62859` 这类不在白名单的域名 | 只用正式域名 |
+| 发布被拒（要求确认） | 线上已有链接，未获得本次发布授权 | 明确说"发布"再发 |
 
 ---
 
-## 六、相关文件
+## 五、和本机剪辑服务的关系
 
-- `tools/publish.sh` —— 一键前置（体检 + 同步 + 复核）
-- `tools/sync-publish-mirror.sh` —— 仅同步镜像（`publish.sh` 内部会调）
-- `workbench/server.js` —— `STATIC_FILES` 白名单 / `SRC_EXT_RE` 源码屏蔽
-- `.wbapp_*.genie` —— **本机状态文件，不应该进 git**（见下）
-
-### 关于 `.wbapp_*.genie` 进 git 的问题
-
-仓库里目前跟踪了两个 `.wbapp_*.genie`。它们是**机器本地状态**，里面的 `localDir` 写死的是本机绝对路径。
-被别的电脑 clone 后，这些过期标记会干扰绑定判断（可能绑不上，也可能误绑到错误的 appId）。
-建议：加入 `.gitignore` 并 `git rm --cached` 从索引移除（物理文件保留在本机）。
+发布只影响**线上那套静态页 + Node 服务**；Mac mini 上的 `127.0.0.1:4191` 制作服务（剪映 / 火山）**不经过发布**，改完代码重启服务即可（`重启制作服务.command`）。
+远程访问（Tailscale）看到的是 `ts.net` 域名直接读磁盘的版本，**永远比线上新**，也不用等发布。
